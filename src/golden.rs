@@ -46,7 +46,7 @@ use crate::raster::{CupsRasterVersion, PageHeader};
 use crate::spl::{current_service_date, SplPaperSize, SplPaperSource};
 use crate::{
     band_height_for, band_placement, compute_page_width_pixels, hard_margin_bytes,
-    process_cups_raster_to_spl, sanitize_copies, CupsFilterArgs,
+    process_with_margin, sanitize_copies, CupsFilterArgs,
 };
 
 /// The FIXED service date written into the goldens.
@@ -77,12 +77,12 @@ struct Media {
     /// `*PaperDimension <key>: "W H"`.
     dimension_pt: (u32, u32),
     /// `*ImageableArea <key>: "L B R T"`.
-    imageable_pt: (u32, u32, u32, u32),
+    imageable_pt: (f64, f64, f64, f64),
 }
 
 impl Media {
     /// Width/height of the imageable area, in points.
-    fn imageable_size_pt(&self) -> (u32, u32) {
+    fn imageable_size_pt(&self) -> (f64, f64) {
         (
             self.imageable_pt.2 - self.imageable_pt.0,
             self.imageable_pt.3 - self.imageable_pt.1,
@@ -93,57 +93,57 @@ impl Media {
 const A4: Media = Media {
     ppd_key: "A4",
     dimension_pt: (595, 842),
-    imageable_pt: (12, 12, 583, 830),
+    imageable_pt: (12.5, 12.5, 582.5, 829.5),
 };
 const LETTER: Media = Media {
     ppd_key: "Letter",
     dimension_pt: (612, 792),
-    imageable_pt: (12, 12, 600, 780),
+    imageable_pt: (12.5, 12.5, 599.5, 779.5),
 };
 const A5: Media = Media {
     ppd_key: "A5",
     dimension_pt: (420, 595),
-    imageable_pt: (12, 12, 408, 583),
+    imageable_pt: (12.5, 12.5, 407.5, 582.5),
 };
 const ENV_C5: Media = Media {
     ppd_key: "EnvC5",
     dimension_pt: (459, 649),
-    imageable_pt: (12, 12, 447, 637),
+    imageable_pt: (12.5, 12.5, 446.5, 636.5),
 };
 const LEGAL: Media = Media {
     ppd_key: "Legal",
     dimension_pt: (612, 1008),
-    imageable_pt: (12, 12, 600, 996),
+    imageable_pt: (12.5, 12.5, 599.5, 995.5),
 };
 const FOLIO: Media = Media {
     ppd_key: "Folio",
     dimension_pt: (595, 935),
-    imageable_pt: (12, 12, 583, 923),
+    imageable_pt: (12.5, 12.5, 582.5, 922.5),
 };
 const EXECUTIVE: Media = Media {
     ppd_key: "Executive",
     dimension_pt: (522, 756),
-    imageable_pt: (12, 12, 510, 744),
+    imageable_pt: (12.5, 12.5, 509.5, 743.5),
 };
 const A6: Media = Media {
     ppd_key: "A6",
     dimension_pt: (297, 420),
-    imageable_pt: (12, 12, 285, 408),
+    imageable_pt: (12.5, 12.5, 284.5, 407.5),
 };
 const B5: Media = Media {
     ppd_key: "B5",
     dimension_pt: (516, 729),
-    imageable_pt: (12, 12, 504, 717),
+    imageable_pt: (12.5, 12.5, 503.5, 716.5),
 };
 const ENV_10: Media = Media {
     ppd_key: "Env10",
     dimension_pt: (297, 684),
-    imageable_pt: (12, 12, 285, 672),
+    imageable_pt: (12.5, 12.5, 284.5, 671.5),
 };
 const ENV_DL: Media = Media {
     ppd_key: "EnvDL",
     dimension_pt: (312, 624),
-    imageable_pt: (12, 12, 300, 612),
+    imageable_pt: (12.5, 12.5, 299.5, 611.5),
 };
 
 /// Every medium the PPD declares. `test_golden_media_matches_ppd` checks each
@@ -181,7 +181,7 @@ const PPD_RESOLUTIONS: &[(u32, u32)] = &[(300, 300), (600, 600), (1200, 600), (1
 const SYNTH_A4_NARROW_MARGIN: Media = Media {
     ppd_key: "A4",
     dimension_pt: (595, 842),
-    imageable_pt: (6, 12, 560, 830),
+    imageable_pt: (6.0, 12.0, 560.0, 830.0),
 };
 
 /// A4 sheet, 12 pt left margin but a much narrower imageable area: hard margin
@@ -189,7 +189,7 @@ const SYNTH_A4_NARROW_MARGIN: Media = Media {
 const SYNTH_A4_NARROW_AREA: Media = Media {
     ppd_key: "A4",
     dimension_pt: (595, 842),
-    imageable_pt: (12, 12, 400, 830),
+    imageable_pt: (12.0, 12.0, 400.0, 830.0),
 };
 
 /// The fabricated media, kept out of `PPD_MEDIA` so the PPD checks stay honest.
@@ -203,8 +203,8 @@ const SYNTHETIC_MEDIA: &[Media] = &[SYNTH_A4_NARROW_MARGIN, SYNTH_A4_NARROW_AREA
 /// reproduced exactly by this formula, and
 /// `test_golden_geometry_matches_measured_cupsfilter_output` verifies it.
 /// `ceil` or `floor` misses at least one of the eight.
-fn px_from_pt(pt: u32, dpi: u32) -> u32 {
-    ((pt as u64 * dpi as u64 * 2 + 72) / (72 * 2)) as u32
+fn px_from_pt(pt: f64, dpi: u32) -> u32 {
+    (pt * f64::from(dpi) / 72.0).round() as u32
 }
 
 /// Page content.
@@ -423,12 +423,12 @@ fn build_page_header(case: &Case) -> Vec<u8> {
 
     put(276, case.resolution.0); // HWResolution[0]
     put(280, case.resolution.1); // HWResolution[1]
-    put(284, img_l); // ImagingBoundingBox
-    put(288, img_b);
-    put(292, img_r);
-    put(296, img_t);
-    put(312, img_l); // Margins[0] — left edge of *ImageableArea
-    put(316, img_b); // Margins[1]
+    put(284, img_l as u32); // ImagingBoundingBox
+    put(288, img_b as u32);
+    put(292, img_r as u32);
+    put(296, img_t as u32);
+    put(312, img_l as u32); // Margins[0] — left edge of *ImageableArea
+    put(316, img_b as u32); // Margins[1]
     put(324, case.media_position);
     put(340, case.copies);
     put(352, case.media.dimension_pt.0); // PageSize[0]
@@ -532,7 +532,7 @@ fn build_sidecar(case: &Case) -> String {
     let page_width_px =
         compute_page_width_pixels(header.page_size_points[0], header.hw_resolution[0]);
     let band_width_bytes = page_width_px.div_ceil(8);
-    let hard_margin = hard_margin_bytes(header.margins[0], header.hw_resolution[0]);
+    let hard_margin = hard_margin_bytes(case.media.imageable_pt.0, header.hw_resolution[0]);
     let placement = band_placement(
         band_width_bytes as usize,
         header.bytes_per_line as usize,
@@ -585,6 +585,7 @@ fn build_sidecar(case: &Case) -> String {
     "page_width_pixels": {page_width_px},
     "band_width_bytes": {band_width_bytes},
     "band_height_lines": {band_height},
+    "hard_margin_pt": {driver_margin},
     "hard_margin_bytes": {hard_margin},
     "dst_offset_bytes": {dst_offset},
     "src_skip_bytes": {src_skip},
@@ -642,6 +643,7 @@ fn build_sidecar(case: &Case) -> String {
         band_width_bytes = band_width_bytes,
         band_height = band_height,
         hard_margin = hard_margin,
+        driver_margin = case.media.imageable_pt.0,
         dst_offset = placement.dst_offset,
         src_skip = placement.src_skip,
         paper_code = paper_size as u8,
@@ -674,11 +676,12 @@ fn run_case(case: &Case) -> Vec<u8> {
     dump_raster_if_requested(case, &raster);
 
     let mut out: Vec<u8> = Vec::new();
-    process_cups_raster_to_spl(
+    process_with_margin(
         &args,
         Box::new(Cursor::new(raster)),
         &mut out,
         GOLDEN_SERVICE_DATE,
+        case.media.imageable_pt.0,
     )
     .unwrap_or_else(|e| panic!("golden case '{}' failed to process: {}", case.name, e));
     out
@@ -845,7 +848,7 @@ fn test_golden_geometry_matches_measured_cupsfilter_output() {
     ];
     for (imageable_pt, dpi, expected) in measured {
         assert_eq!(
-            px_from_pt(imageable_pt, dpi),
+            px_from_pt(f64::from(imageable_pt), dpi),
             expected,
             "{} pt @ {} DPI",
             imageable_pt,
@@ -868,6 +871,7 @@ fn test_golden_media_matches_ppd() {
     .expect("could not read the PPD");
 
     for media in PPD_MEDIA.iter().copied() {
+        assert_eq!(media.imageable_pt.0, crate::media::HARD_MARGIN_PT);
         let dim_line = format!("*PaperDimension {}/", media.ppd_key);
         let dim = ppd
             .lines()
@@ -892,7 +896,7 @@ fn test_golden_media_matches_ppd() {
             .lines()
             .find(|l| l.starts_with(&area_line))
             .unwrap_or_else(|| panic!("no *ImageableArea {} in the PPD", media.ppd_key));
-        let area_values: Vec<u32> = area
+        let area_values: Vec<f64> = area
             .split('"')
             .nth(1)
             .expect("*ImageableArea value must be quoted")
@@ -1041,7 +1045,7 @@ fn test_golden_corpus_covers_positive_dst_offset() {
         let placement = band_placement(
             band_width_bytes as usize,
             header.bytes_per_line as usize,
-            hard_margin_bytes(header.margins[0], header.hw_resolution[0]),
+            hard_margin_bytes(case.media.imageable_pt.0, header.hw_resolution[0]),
         )
         .expect("a golden case must produce a valid placement");
         if placement.dst_offset > 0 {
@@ -1107,7 +1111,7 @@ fn test_band_count_stays_inside_the_qpdl_band_order_field() {
 
     assert_eq!(
         worst,
-        (129, "Legal", (1200, 1200)),
+        (128, "Legal", (1200, 1200)),
         "the worst case in the matrix moved; re-check the ceiling argument"
     );
 }

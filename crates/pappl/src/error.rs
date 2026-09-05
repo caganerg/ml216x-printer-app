@@ -27,6 +27,8 @@ pub enum Error {
     },
     /// The job was cancelled while we were producing output for it.
     Cancelled,
+    /// An I/O error while emitting a callback result.
+    Io(std::io::Error),
     /// A failure produced by the driver itself, with its own message.
     Driver(String),
 }
@@ -44,6 +46,7 @@ impl fmt::Display for Error {
                 f,
                 "device write failed: asked for {requested} bytes, papplDeviceWrite returned {returned}"
             ),
+            Error::Io(error) => write!(f, "I/O error: {error}"),
             Error::Cancelled => write!(f, "the job was cancelled"),
             Error::Driver(message) => write!(f, "{message}"),
         }
@@ -65,3 +68,9 @@ impl From<Error> for std::io::Error {
 
 /// Result alias for the wrapper.
 pub type Result<T> = std::result::Result<T, Error>;
+
+impl From<std::io::Error> for Error {
+    fn from(error: std::io::Error) -> Self {
+        Self::Io(error)
+    }
+}

@@ -141,10 +141,11 @@ fn log(job: *mut sys::pappl_job_t, level: sys::pappl_loglevel_t, message: &Stack
     if job.is_null() {
         // No job to log against. stderr is what PAPPL gives a driver with no
         // context, and it is better than dropping the reason on the floor.
-        eprintln!(
-            "pappl: {}",
-            String::from_utf8_lossy(&message.buffer[..message.len])
-        );
+        use std::io::Write;
+        let mut stderr = std::io::stderr().lock();
+        let _ = stderr.write_all(b"pappl: ");
+        let _ = stderr.write_all(&message.buffer[..message.len]);
+        let _ = stderr.write_all(b"\n");
         return;
     }
 

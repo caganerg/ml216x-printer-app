@@ -1,5 +1,13 @@
 # Golden Files
 
+**Baseline update, 2026-09-06:** the maintainer selected 12.5 pt margins.
+The corpus now freezes that intentional change; it is no longer expected to
+match the untouched 12 pt `v1.x-final` binary. Thirty production SPL streams
+changed; the two synthetic SPL streams remain byte-identical. Every sidecar
+records the exact driver margin separately from truncated integer CUPS fields.
+See `docs/GOLDEN-VALIDATION.md` for the audit of this refresh.
+
+
 This directory freezes **the SPL2/QPDL bytes the 1.x CUPS filter produces**
 before the move to a PAPPL Printer Application. The acceptance criterion is
 byte-for-byte identity (project rule 6), and that criterion needs a reference

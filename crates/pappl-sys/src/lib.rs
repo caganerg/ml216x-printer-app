@@ -93,23 +93,63 @@ pub struct cups_option_t {
     _marker: core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
 }
 
-/// `cups_page_header2_t` from `<cups/raster.h>`, as embedded in
-/// `pappl_pr_options_t`.
-///
-/// Held as opaque storage of the exact size and alignment the probe reports
-/// (1796 bytes, 4-byte aligned with CUPS 2.4.10). This is enough to make every
-/// field of `pappl_pr_options_t` that follows it land at the right offset, and
-/// it is verified like any other type. The individual raster fields are NOT
-/// bound yet: they are a CUPS header rather than a PAPPL one, and they get the
-/// same treatment — transcription plus probe entries — when the raster
-/// callbacks need them.
-///
-/// Note this is the in-memory C struct, which is not the same layout as the
-/// 1796-byte big-endian header `spl2-core`'s raster parser reads from a file.
-/// They must not be confused.
-#[repr(C, align(4))]
+/// In-memory CUPS 2.4 `cups_page_header2_t`, transcribed from
+/// `/usr/include/cups/raster.h`. CUPS' nonnegative enum fields use unsigned
+/// storage; every field offset and size is checked by the C layout probe.
+/// This is native-endian memory, not a raster stream header.
+#[repr(C)]
+#[allow(non_snake_case)]
+#[derive(Clone, Copy)]
 pub struct cups_page_header2_t {
-    pub opaque: [u8; CUPS_PAGE_HEADER2_SIZE],
+    pub MediaClass: [c_char; 64],
+    pub MediaColor: [c_char; 64],
+    pub MediaType: [c_char; 64],
+    pub OutputType: [c_char; 64],
+    pub AdvanceDistance: c_uint,
+    pub AdvanceMedia: c_uint,
+    pub Collate: c_uint,
+    pub CutMedia: c_uint,
+    pub Duplex: c_uint,
+    pub HWResolution: [c_uint; 2],
+    pub ImagingBoundingBox: [c_uint; 4],
+    pub InsertSheet: c_uint,
+    pub Jog: c_uint,
+    pub LeadingEdge: c_uint,
+    pub Margins: [c_uint; 2],
+    pub ManualFeed: c_uint,
+    pub MediaPosition: c_uint,
+    pub MediaWeight: c_uint,
+    pub MirrorPrint: c_uint,
+    pub NegativePrint: c_uint,
+    pub NumCopies: c_uint,
+    pub Orientation: c_uint,
+    pub OutputFaceUp: c_uint,
+    pub PageSize: [c_uint; 2],
+    pub Separations: c_uint,
+    pub TraySwitch: c_uint,
+    pub Tumble: c_uint,
+    pub cupsWidth: c_uint,
+    pub cupsHeight: c_uint,
+    pub cupsMediaType: c_uint,
+    pub cupsBitsPerColor: c_uint,
+    pub cupsBitsPerPixel: c_uint,
+    pub cupsBytesPerLine: c_uint,
+    pub cupsColorOrder: c_uint,
+    pub cupsColorSpace: c_uint,
+    pub cupsCompression: c_uint,
+    pub cupsRowCount: c_uint,
+    pub cupsRowFeed: c_uint,
+    pub cupsRowStep: c_uint,
+    pub cupsNumColors: c_uint,
+    pub cupsBorderlessScalingFactor: f32,
+    pub cupsPageSize: [f32; 2],
+    pub cupsImagingBBox: [f32; 4],
+    pub cupsInteger: [c_uint; 16],
+    pub cupsReal: [f32; 16],
+    pub cupsString: [[c_char; 64]; 16],
+    pub cupsMarkerType: [c_char; 64],
+    pub cupsRenderingIntent: [c_char; 64],
+    pub cupsPageSizeName: [c_char; 64],
 }
 
 /// Size of `cups_page_header2_t` as measured against CUPS
@@ -1082,3 +1122,9 @@ extern "C" {
     /// ```
     pub fn papplCopyString(dst: *mut c_char, src: *const c_char, dstsize: usize) -> usize;
 }
+
+// Values from cups/raster.h and cups/ipp.h; verified by the layout probe.
+pub const CUPS_CSPACE_K: u32 = 3;
+pub const CUPS_ORDER_CHUNKED: u32 = 0;
+pub const IPP_ORIENT_NONE: u32 = 7;
+pub const IPP_QUALITY_NORMAL: u32 = 4;

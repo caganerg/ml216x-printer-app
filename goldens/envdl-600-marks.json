@@ -13,15 +13,15 @@
     "cupsPageSizeName": "EnvDL",
     "HWResolution": [600, 600],
     "PageSize": [312, 624],
-    "ImagingBoundingBox": [12, 12, 300, 612],
+    "ImagingBoundingBox": [12.5, 12.5, 299.5, 611.5],
     "Margins": [12, 12],
     "MediaPosition": 0,
     "NumCopies": 1,
     "Duplex": false,
     "Tumble": false,
-    "cupsWidth": 2400,
-    "cupsHeight": 5000,
-    "cupsBytesPerLine": 300,
+    "cupsWidth": 2392,
+    "cupsHeight": 4992,
+    "cupsBytesPerLine": 299,
     "cupsBitsPerColor": 1,
     "cupsBitsPerPixel": 1,
     "cupsColorOrder": 0,
@@ -32,7 +32,8 @@
     "page_width_pixels": 2600,
     "band_width_bytes": 325,
     "band_height_lines": 128,
-    "hard_margin_bytes": 13,
+    "hard_margin_pt": 12.5,
+    "hard_margin_bytes": 14,
     "dst_offset_bytes": 0,
     "src_skip_bytes": 1,
     "paper_size_code": 9,
@@ -42,6 +43,6 @@
   "ppd_source": {
     "PageSize": "EnvDL",
     "PaperDimension": "312 624",
-    "ImageableArea": "12 12 300 612"
+    "ImageableArea": "12.5 12.5 299.5 611.5"
   }
 }

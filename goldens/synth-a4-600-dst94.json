@@ -32,6 +32,7 @@
     "page_width_pixels": 4960,
     "band_width_bytes": 620,
     "band_height_lines": 128,
+    "hard_margin_pt": 12,
     "hard_margin_bytes": 13,
     "dst_offset_bytes": 94,
     "src_skip_bytes": 0,

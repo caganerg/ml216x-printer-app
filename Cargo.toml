@@ -3,7 +3,7 @@
 [workspace]
 # The 1.x filter stays the root package until P11 is green (decision Q-5);
 # the 2.0 crates are added here as they are written.
-members = ["crates/pappl-sys", "crates/pappl"]
+members = ["crates/pappl-sys", "crates/pappl", "crates/ml216x-printer-app"]
 
 [package]
 name = "samsung-2160-rust"

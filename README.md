@@ -1,10 +1,54 @@
 # samsung-ml2160-rust
-> ### 🚀 Project Status: 1.x complete (`v1.0.2`) · 2.0 in development
-> The CUPS raster filter is **production-ready**, feature-complete, and actively verified on Debian Linux: the core SPL rasterization and PJL command stack are fully functional and stable. It is frozen at `v1.0.2` on the `legacy/cups-filter-1.x` branch, which is where fixes to the filter belong. `main` now carries `2.0.0-alpha`, where the driver becomes a standalone Printer Application.
->
-> 🧪 **Community Testing & Feedback Wanted:**
-> While primarily verified on the **Samsung ML-2160** series, this driver should theoretically support other SPL-based Samsung / SPL-compatible monochrome laser printers. 
-> - If you test this driver on a different printer model, please **[open an Issue](https://github.com/caganerg/samsung-ml2160-rust/issues)** or submit a PR to report your results (positive or negative) so we can expand the tested hardware list!
+> **2.0 development:** the PAPPL mainloop and P5 geometry probe are implemented.
+> Actual SPL2 printing through PAPPL is not connected yet. The transitional
+> filter and PPD now use the maintainer-selected **12.5 pt** margins; physical
+> validation is still required. The original 1.x release remains on
+> `legacy/cups-filter-1.x` / `v1.x-final`.
+
+## PAPPL development (P5)
+
+Build dependencies: Rust 1.77+, `pkg-config`, a C compiler, `libpappl-dev`
+(1.3.x; tested with 1.3.1), and `libcups2-dev`. Run the integration experiment
+with `ipptool` from `cups-ipp-utils` installed:
+
+```sh
+cargo build -p ml216x-printer-app
+python3 scripts/p5-probe.py --output /tmp/p5-measurements.json
+python3 scripts/p5-probe.py --device-failure --output /tmp/p5-failure.json
+```
+
+For manual inspection, explicitly start the probe server in one terminal:
+
+```sh
+./target/debug/ml216x-printer-app --probe \
+  --probe-output /tmp/ml216x-probe.jsonl --listen-port 8631 server
+```
+
+Submit a matching PWG file from another terminal, specifying the resolution
+and medium explicitly:
+
+```sh
+./target/debug/ml216x-printer-app submit \
+  -u ipp://127.0.0.1:8631/ipp/print/probe \
+  -o printer-resolution=600dpi -o media=iso_a4_210x297mm page.pwg
+```
+
+The probe writes JSON Lines, permits only file destinations, and binds TCP to
+127.0.0.1. Stop it with Ctrl-C or the `shutdown` subcommand and the same `-u`
+server URI. Real print jobs are refused until the encoder adapter is connected.
+PAPPL's auto-start command does not preserve these custom flags, so start the
+probe with the explicit `server` command above.
+
+The 17-case experiment measured **full-media raster with zero header margins**.
+See [margin decision and measured results](docs/MARGINS.md) and
+[current migration state](docs/SESSION-STATE.md). P9 must still review raster
+conversion/dithering and input-versus-job geometry before real printing.
+
+## Transitional CUPS filter
+
+The instructions below describe the classic filter. The Debian packaging
+recipe is historical and has not yet been migrated to build the PAPPL package.
+The updated PPD must be reloaded into an existing queue when testing 12.5 pt.
 
 A CUPS raster filter (`rastertospl-rust`) for Samsung ML-2160 series monochrome laser printers, written in Rust. It converts CUPS's standard raster stream (`RaSt`/`RaS2`/`RaS3`) into the printer's native binary **SPL2 / QPDL v3** format: PJL job envelope, 17-byte page header, Algo 0x11 RLE-compressed band records, and checksums.
 
@@ -277,10 +321,10 @@ carries no model name anywhere in its device URI.
 ## Testing
 
 ```sh
-cargo test
+cargo test --workspace
 ```
 
-100 unit tests cover the CUPS Raster parser (v1/v2/v3, both endiannesses, the
+The filter unit tests cover the CUPS Raster parser (v1/v2/v3, both endiannesses, the
 v2 line-RLE decoder), page-header validation, the SPL2/QPDL record layout, the
 horizontal band placement, the Algo 0x11 RLE round trip, PJL field sanitisation,
 and every resource limit the filter enforces.

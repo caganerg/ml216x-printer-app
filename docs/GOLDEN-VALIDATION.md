@@ -1,5 +1,11 @@
 # Golden Corpus Validation — 2026-09-05
 
+**Historical validation below covers the original 12 pt corpus.** On
+2026-09-06 the maintainer explicitly selected 12.5 pt and authorized P5.
+The current corpus deliberately differs from `v1.x-final`; see the refresh
+record at the end of this document.
+
+
 The 15-case golden corpus in `goldens/` is the reference every later step of
 the PAPPL migration compares against: ground rule 6 makes byte-for-byte
 identity the acceptance criterion, so if these bytes are wrong, every "no
@@ -165,3 +171,59 @@ page and measure both. Until G-1 is satisfied, R-1 is carried as an open risk
 in every status report, and `docs/MARGINS.md` (the P5 printable-area
 experiment) does not close it — that experiment establishes what PAPPL
 delivers, not where the toner lands.
+
+
+## 2026-09-06 — authorized 12.5 pt refresh
+
+Reason: maintainer instruction to adopt SpliX ML-2165's 12.5 pt margin and
+proceed with P5. This is **not** a newly measured hardware value; G-1 remains
+open per model. `src/media.rs`, the PPD and the golden media table change
+in the same working-tree change.
+
+The harness now preserves fractional points and records `hard_margin_pt` in
+all 32 sidecars. CUPS' integer header margins remain truncated values; they
+no longer determine the production filter's placement. Production golden
+cases inject the same 12.5 pt constant; only two synthetic cases retain their
+historical 6/12 pt test geometry. The older cupsfilter height measurements
+remain tests of the legacy rounding rule, not measurements of the new PPD.
+
+**30 SPL streams changed; the two synthetic streams did not.** PJL and the
+compression algorithm were unchanged. The first changed byte is the page
+height at offset 315, caused by reducing the printable height by one point.
+Band payloads/placement also change, and Legal @1200 needs 128 bands instead
+of 129. `SERVICEDATE` stays pinned. All golden comparisons pass after refresh.
+The original mutation results above remain historical evidence; they were
+not rerun for this margin change.
+
+| Case | Previous bytes | Updated bytes | First difference |
+|---|---:|---:|---:|
+| a4-1200-marks | 89600 | 89604 | 315 |
+| a4-1200x600-marks | 45451 | 45455 | 315 |
+| a4-300-marks | 16167 | 16167 | 315 |
+| a4-600-blank | 28687 | 28687 | 315 |
+| a4-600-marks-2pages-1000copies | 57321 | 57197 | 315 |
+| a4-600-marks-3copies | 28819 | 28757 | 315 |
+| a4-600-marks-3pages | 85823 | 85637 | 315 |
+| a4-600-marks-utf8-title | 28838 | 28776 | 334 |
+| a4-600-marks-v2rle | 28819 | 28757 | 315 |
+| a4-600-marks | 28819 | 28757 | 315 |
+| a5-600-marks | 16927 | 16923 | 315 |
+| a6-600-marks | 10115 | 10113 | 315 |
+| b5-600-marks | 22691 | 22687 | 315 |
+| env10-600-marks | 16422 | 16420 | 315 |
+| envc5-600-marks-manual-env | 19124 | 19124 | 315 |
+| envc5-600-marks | 19124 | 19124 | 315 |
+| envdl-600-marks | 15549 | 15172 | 315 |
+| executive-600-marks | 23845 | 23845 | 315 |
+| folio-1200-marks | 99596 | 99600 | 315 |
+| folio-1200x600-marks | 50449 | 50453 | 315 |
+| folio-300-marks | 17925 | 17925 | 315 |
+| folio-600-marks | 31969 | 31907 | 315 |
+| legal-1200-marks | 110248 | 109399 | 314 |
+| legal-1200x600-marks | 55784 | 54935 | 315 |
+| legal-300-marks | 19520 | 19225 | 315 |
+| legal-600-marks | 35114 | 34581 | 315 |
+| letter-1200-marks | 85571 | 85571 | 314 |
+| letter-1200x600-marks | 43021 | 43021 | 314 |
+| letter-300-marks | 15095 | 15095 | 315 |
+| letter-600-marks | 27121 | 27119 | 314 |

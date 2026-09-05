@@ -1,4 +1,77 @@
-# Hard Margins — an open question that hardware settles
+# Hard Margins — 12.5 pt selected; hardware validation remains open
+
+## Current decision and P5 experiment — 2026-09-06
+
+The maintainer selected **12.5 pt on all edges** and authorized P5. The PPD,
+transitional filter and PAPPL capabilities have been updated. This follows
+SpliX's **ML-2165** setting; it is not a claim that the ML-2160 setting below
+was also 12.5 pt, and it does not satisfy hardware gate G-1.
+
+`src/media.rs` preserves fractional points. PAPPL/IPP publishes **441** in
+0.01 mm units (12.5 pt = 440.9722...). The encoder's byte-aligned margin is
+**7, 14, 27 bytes** at 300, 600 and 1200 dpi. The header's integer `Margins[]`
+is no longer the driver's source of truth.
+
+### What PAPPL actually supplies
+
+Measured with the installed **PAPPL 1.3.1 / CUPS 2.4.10**, using real
+`cupsRasterInitPWGHeader` / `cupsRasterWriteHeader2` PWG streams, `ipptool`
+Print-Job, and the Rust callbacks. All **17 cases passed**: A4 and Letter at
+all four supported resolution pairs, and the other nine media at 600 dpi.
+The script checks job-state=completed, every scanline index, four sheet-edge
+marks and four inset marks. Raw evidence: [`P5-MEASUREMENTS.json`](P5-MEASUREMENTS.json).
+
+| Medium | DPI | Callback width × height | Bytes/line |
+|---|---|---|---|
+| A4 | 300×300 | 2480 × 3507 | 310 |
+| A4 | 600×600 | 4960 × 7015 | 620 |
+| A4 | 1200×600 | 9921 × 7015 | 1241 |
+| A4 | 1200×1200 | 9921 × 14031 | 1241 |
+| Letter | 300×300 | 2550 × 3300 | 319 |
+| Letter | 600×600 | 5100 × 6600 | 638 |
+| Letter | 1200×600 | 10200 × 6600 | 1275 |
+| Letter | 1200×1200 | 10200 × 13200 | 1275 |
+
+**Conclusion for this tested BLACK_1/PWG path: full media, not printable area.**
+`Margins[]` is `[0,0]`; media-col margins remain 441. Sheet-edge marks arrive
+unchanged, so PAPPL has not cropped away the hard margins. This does not yet
+characterize PNG/JPEG conversion or other raster types (P9).
+
+Consequences for the next encoder adapter:
+
+- Distinguish PWG full-sheet input from the classic PPD printable-area input;
+  do not subtract the hard margin twice or reuse the centring calculation blindly.
+- Use canonical PWG millimetre dimensions when validating IPP options. For
+  example A4 @600 is 7015 lines here, versus a 7017-line physical height derived
+  from the legacy rounded 842 pt. Preserve the legacy QPDL contract deliberately.
+- Request matching IPP and input raster resolutions. In a discovery run with
+  no explicit resolution, PAPPL selected 1200×600 for a 600×600 input and padded
+  the row to 1241 bytes. Internally consistent options alone do not prove that
+  client raster geometry matches them. P9 must address this before real printing.
+- Callback page numbering was **1-based** in these runs, despite the installed
+  guide describing it as starting at 0. Use measured/source-confirmed behaviour.
+- PAPPL 1.3.1 ignores `rwriteline_cb`'s boolean return in `job-process.c`.
+  The wrapper retains a failure marker and returns false from `rendpage` and
+  `rendjob`. A real `/dev/full` run ended with IPP job-state=aborted.
+- PAPPL increments PWG impressions itself; the probe does not increment again.
+
+Reproduce (no printer required):
+
+```sh
+cargo build -p ml216x-printer-app
+python3 scripts/p5-probe.py --output /tmp/p5-measurements.json
+python3 scripts/p5-probe.py --device-failure --output /tmp/p5-failure.json
+```
+
+The tests bind loopback only and stop their temporary server on success or
+failure. Inputs and JSONL output stay in a temporary directory. They require
+`cc`, `libcups2-dev`, `libpappl-dev` and `ipptool` (`cups-ipp-utils`).
+
+## Historical investigation — 2026-09-05
+
+The text below records the evidence before the maintainer selected 12.5 pt.
+References to “today”, “not changed” and “open” below describe that baseline.
+
 
 *Written 2026-09-05, ahead of P5. **The margin table has not been changed.***
 

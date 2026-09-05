@@ -60,6 +60,7 @@
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
+pub mod application;
 mod callback;
 mod device;
 mod error;

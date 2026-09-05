@@ -144,3 +144,25 @@ The `cups_page_header2_t` embedded in `pappl_pr_options_t` is held as opaque
 storage of the probed size (1796 bytes) for now. Its individual raster fields
 are a CUPS header rather than a PAPPL one and get the same treatment —
 transcription plus probe entries — when the raster callbacks need them.
+
+
+## P5 additions — 2026-09-06
+
+No additional library functions were bound. The installed
+`/usr/include/cups/raster.h` `cups_page_header2_t` declaration is now represented
+field-by-field (49 fields), and every offset/field size is checked by the C
+probe. `CUPS_CSPACE_K`, `CUPS_ORDER_CHUNKED`, `IPP_ORIENT_NONE` and
+`IPP_QUALITY_NORMAL` are also checked against installed headers.
+
+Runtime ownership and callback behaviour were cross-checked in the official
+1.3.1 sources as well as exercised by `scripts/p5-probe.py`:
+
+- [system-accessors.c](https://github.com/michaelrsweet/pappl/blob/v1.3.1/pappl/system-accessors.c):
+  `papplSystemSetPrinterDrivers` retains the descriptor-array pointer. The
+  wrapper now keeps that array alive throughout mainloop and system teardown.
+- [job-process.c](https://github.com/michaelrsweet/pappl/blob/v1.3.1/pappl/job-process.c):
+  PWG page numbering starts at 1; PAPPL counts impressions; `rwriteline_cb`
+  return values are ignored while `rendpage_cb`/`rendjob_cb` failures abort.
+- [mainloop-subcommands.c](https://github.com/michaelrsweet/pappl/blob/v1.3.1/pappl/mainloop-subcommands.c):
+  mainloop deletes the system and reads `XDG_CONFIG_HOME` for its state path.
+  The integration test scopes that directory to its temporary subprocess.

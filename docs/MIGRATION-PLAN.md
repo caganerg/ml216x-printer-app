@@ -1,6 +1,11 @@
 # ML-216x: CUPS Filter → PAPPL Printer Application — Repository Audit & Migration Plan
 
-Status: **audit only, no code changed.**
+Current progress (2026-09-06): **P1–P5 implemented**, with a file-only P5
+geometry probe. The maintainer selected 12.5 pt and authorized the golden
+refresh. See `SESSION-STATE.md`, `DECISIONS.md` and `MARGINS.md` for current
+state. The baseline audit and its original recommendations below are historical.
+
+Original status: **audit only, no code changed.**
 Baseline commit: `33d4ff2` (`main`, clean tree).
 Baseline test run: `cargo test` — **101 passed, 0 failed**.
 
@@ -310,9 +315,9 @@ samsung-ml2160-rust/            # virtual workspace root
   with a specific error, never be clamped or defaulted**. See requirement
   R-6/H in §9. This is also where the per-page geometry validation from the
   1.x `validate_page_header` lands, so the two checks are one piece of work.
-- **New, and blocked:** the hard-margin table in the driver-capability data
-  cannot be finalised until the ML-2160 vs ML-2165 margin question is settled
-  by measurement — see `docs/MARGINS.md` and release gate G-1. PAPPL's
+- **Implemented provisionally in P5:** the hard-margin table uses the
+  maintainer-selected 12.5 pt (441 IPP units). Physical model-specific
+  validation remains required — see `docs/MARGINS.md` and release gate G-1. PAPPL's
   driver data can express per-model margins; the classic PPD could not, so if
   the models differ this step is where that is expressed.
 
@@ -623,10 +628,9 @@ PAPPL, not a bug to compensate for.
    regression recorded at `src/main.rs:427`. A page that looks fine until
    measured is worse than a refused job.
 
-**Still to determine empirically (deferred to P5, see below):** whether PAPPL
-delivers `cupsWidth`/`cupsHeight` and scanlines for the *printable area* or the
-*full media*. To be answered by experiment, not documentation, and written up
-in `docs/MARGINS.md`.
+**Measured in P5 (2026-09-06):** the BLACK_1/PWG path delivers full-media
+geometry and scanlines, with zero header margins. All 17 cases passed; see
+`docs/MARGINS.md` and `docs/P5-MEASUREMENTS.json`.
 
 ### D-3 — Golden harness ships JSON sidecars and a margin-specific case
 **Answered: Q-9.** Implemented in P2; see `src/golden.rs` and `goldens/`.
@@ -657,9 +661,12 @@ the index.
 | Q-10 | Device transport | **USB first, socket second.** Do not defer socket past 2.0 without asking. |
 | Q-11 | Language for new code | **English** for code, comments, identifiers, commits, docs and packaging metadata. |
 
-### Still open
+### Current outstanding validation
 
-**Nothing.** Q-8a — the licence for the FFI crates — was the last open
+The maintainer selected 12.5 pt and P5 measured full-media raster delivery.
+Hardware gate G-1 and P9's raster/dithering validation remain open.
+
+Historical question closure: Q-8a — the licence for the FFI crates — was the last open
 question and was decided on 2026-09-05: `pappl-sys` and `pappl` are both
 `Apache-2.0 OR MIT`, while `spl2-core` and `ml216x-printer-app` stay
 `GPL-2.0-only`. The MIT arm is what lets a GPL-2.0-only binary link them
@@ -669,11 +676,8 @@ outstanding until the crates exist.
 
 ### Deferred to a later step, not blocking
 
-- **The printable-area vs full-media experiment (from Q-2).** Whether PAPPL
-  delivers `cupsWidth`/`cupsHeight` and scanlines for the printable area or the
-  full media must be answered by experiment, not documentation, and written up
-  in `docs/MARGINS.md`. It needs a working minimal PAPPL app, so it belongs to
-  P5.
+- **Completed in P5: printable-area vs full-media experiment (Q-2).** The
+  tested BLACK_1/PWG path supplies full media; see `docs/MARGINS.md`.
 - **Dithering-path exposure (from the Q-1 follow-up).** Whether declaring only
   1-bit black raster makes PAPPL's dithering overflow unreachable for us is to
   be settled as part of the P9 raster-type decision and recorded in

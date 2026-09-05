@@ -18,6 +18,31 @@ exists to prevent.
 
 ---
 
+## 2026-09-06 — Q-2 follow-up: use 12.5 pt and proceed with P5
+
+The maintainer explicitly selected **12.5 pt on every edge**, following the
+SpliX ML-2165 override, and authorized the next migration step. This supersedes
+the block below requiring a measurement before implementing capabilities.
+It does **not** constitute a physical measurement for ML-2160/2165/2165W/2168:
+release gate G-1 remains open, per model.
+
+- The PPD and transitional filter now use 12.5 pt. `src/media.rs` holds the
+  shared driver constant. Integer CUPS `Margins[]` must not truncate it.
+- IPP uses hundredths of a millimetre: 12.5 pt is represented as **441**.
+  SPL band placement uses the exact points, giving **7/14/27 bytes** at
+  300/600/1200 dpi.
+- This is an explicitly authorized change to the frozen filter's margin
+  behaviour. The 30 production golden streams and all 32 JSON sidecars were
+  refreshed together; the two synthetic streams retain their historical
+  injected margins. No unrelated SPL2 protocol changes were made.
+- P5 is implemented as a minimal mainloop with capabilities and an explicit
+  file-only geometry probe. Real SPL2 printing remains unconnected and fails
+  with a clear error. See `P5-MEASUREMENTS.json` and `MARGINS.md`.
+- The experiment shows full-media BLACK_1 lines and zero header margins.
+  Do not feed them unadapted into the classic printable-area band placement.
+
+---
+
 ## 2026-09-05
 
 ### The two blocking answers
@@ -93,14 +118,13 @@ Agreed actions, in order:
 ### Q-2 — Where the hard margin comes from
 **Decision: a driver constant derived from the PPD; no zero fallback.**
 
-Reasoning as above. Still to determine empirically, deferred to P5: whether
-PAPPL delivers `cupsWidth`/`cupsHeight` and scanlines for the *printable area*
-or the *full media*. To be answered by experiment, not documentation, and
-written up in `docs/MARGINS.md`.
+Reasoning as above. P5 measured full-media BLACK_1/PWG scanlines on
+2026-09-06; see `docs/MARGINS.md`. The selected 12.5 pt margin is preserved
+separately from the integer/zero raster-header fields.
 
-#### Q-2 follow-up — OPEN: upstream's margins disagree with ours, per model
+#### Q-2 follow-up — historical open question (superseded 2026-09-06)
 
-**Status: open, blocking the driver-capability table. Awaiting a hardware
+**Historical status on 2026-09-05: blocked pending a hardware
 measurement; see [`docs/MARGINS.md`](MARGINS.md) for the full trace and the
 three candidate resolutions.** The margin table has not been changed.
 

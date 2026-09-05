@@ -1,41 +1,57 @@
-# Session State — Handover Note
+# Session State — PAPPL migration
 
-*Last updated 2026-09-05 (second session).*
+*Updated 2026-09-06.*
 
-**Raise the hard-margin question first: it is open, it blocks the
-driver-capability table, and only the maintainer's hardware settles it.**
-Upstream SpliX gives the ML-2160 `HWMargins 10.75 15 10.75 15` and the ML-2165
-`12.5 12.5 12.5 12.5`, while this driver's PPD uses 12 pt on every edge — a
-value that traces to a defs file for different hardware and matches neither
-model. At 600 dpi those three values give 12, 14 and 13 hard-margin bytes
-respectively, so the difference is a whole byte column, about 0.34 mm, on a
-page that would look correct. Nothing has been changed:
-[`docs/MARGINS.md`](MARGINS.md) has the full trace, the byte table at every
-resolution and the three candidate resolutions, `docs/DECISIONS.md` carries it
-as an open Q-2 follow-up, and release gate G-1 now requires the measurement to
-name the exact model, per model rather than per family.
+**P5 is implemented and exercised.** The maintainer selected **12.5 pt on
+all edges** and authorized the next step. This follows SpliX's ML-2165
+setting; it is provisional for the family, not a hardware measurement.
+G-1 remains open per model. Do not ask again for permission to use 12.5 pt.
 
-Plan steps P1 to P4 are complete and pushed on `migration/pappl`; P5 is next
-and was deliberately not started. P2's golden corpus is validated rather than
-merely built — 32 cases, reproduced byte-for-byte from the untouched
-`v1.x-final` binary, with each of the five encoder risks R-1 to R-5 injected as a
-defect to prove the suite goes red, and R-5 caught by the corpus alone. (R-6,
-the libcups ABI risk, is not of that kind: it cannot be mutation-tested, and
-its mitigations are build-time, packaging and a runtime backstop.) P3 is
-`crates/pappl-sys`: hand-written FFI whose 8 types, 128 fields, 69 constants
-and 45 symbols are all checked against the installed headers and library by a
-C probe, with the check failing if any probed record is left unchecked. P4 is
-`crates/pappl`: the `guard` shim every `extern "C"` callback body passes
-through so no panic can unwind into C, borrowed `Device`/`Job` handles, and the
-`io::Write` implementation that lets the unchanged SPL2 encoder write to a
-PAPPL device. P5 covers the driver-capability table, the mainloop and the
-printable-area experiment, and carries two requirements written down where they
-will be seen: the hard-margin table cannot be finalised until the measurement
-above, and R-6/H requires the option-struct sanity check to **fail the job, not
-clamp**, because a clamp would delete the only runtime signal that the libcups
-ABI moved. Also outstanding, none of it blocking: SPDX headers on the GPL
-files and the PPD (Q-8b), and the Q-4 toner-save evidence that turned up in the
-SpliX source and is recorded in `docs/NON-GOALS.md`.
+## Current code
+
+- `src/media.rs`: shared 12.5 pt driver constant. The transitional filter
+  preserves fractional points and no longer derives hard margins from integer
+  CUPS `Margins[]`. This is the maintainer-authorized exception to freezing 1.x.
+- `goldens/`: 32 cases refreshed with this intentional behaviour change.
+  30 SPL streams changed; two synthetic SPL streams stayed identical. All
+  sidecars now record `hard_margin_pt`. Original 12 pt evidence is historical.
+- `pappl-sys`: native CUPS page header fields now bound and checked against
+  the C probe (49 additional fields); four additional CUPS/IPP constants.
+- `pappl::application`: minimal mainloop, loopback system, driver capability
+  registration, file-only geometry callbacks and strict R-6/H option checks.
+  Driver descriptors live through mainloop teardown: PAPPL stores their pointer.
+- `ml216x-printer-app`: new unsafe-free binary, eleven media, four resolution
+  pairs, two sources, fourteen media types, BLACK_1 and explicit one-sided.
+  Real SPL2 output is **not connected**; normal jobs fail with an explanation.
+- `scripts/p5-probe.py`: real IPP/PWG integration matrix and `/dev/full`
+  failure test. Uses temporary spool/config/output and stops its server.
+
+## P5 findings that the next step must use
+
+1. BLACK_1 PWG callbacks contain **full media** and zero `Margins[]`, while
+   media-col retains 441 (0.01 mm). All 17 media/resolution cases passed,
+   including exact line counts and eight corner/inset marks. Evidence:
+   `docs/P5-MEASUREMENTS.json`; interpretation: `docs/MARGINS.md`.
+2. Canonical PWG dimensions differ from the rounded legacy PPD points. A4 at
+   600 dpi is 4960×7015, not the legacy full height of 7017.
+3. Request matching IPP and raster resolutions. PAPPL can otherwise construct
+   a different output header and pad/crop the incoming data. Options sanity
+   alone does not validate the original client header. P9 must resolve this.
+4. PAPPL's PWG page callback numbering is 1-based in source and measurement.
+5. PAPPL 1.3.1 ignores a false `rwriteline_cb` return. The wrapper records the
+   failure and refuses `rendpage`/`rendjob`; `/dev/full` produced job-state=aborted.
+6. PAPPL increments PWG impressions itself. Do not double count.
+
+## Next work
+
+Extract `spl2-core`, adapt the full-media raster path, and connect SPL2 job,
+page and band callbacks while preserving the new golden baseline. Keep the
+original filter in-tree until P11 passes; keep the PPD permanently. USB then
+socket remain required for the final application. Hardware G-1 and the P9
+raster/dithering review remain outstanding. No hardware print was performed.
+
+Checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo fmt --all --check`, golden checksums and both P5 integration modes.
 
 ## Step numbering
 

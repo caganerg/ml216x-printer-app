@@ -13,15 +13,15 @@
     "cupsPageSizeName": "A4",
     "HWResolution": [300, 300],
     "PageSize": [595, 842],
-    "ImagingBoundingBox": [12, 12, 583, 830],
+    "ImagingBoundingBox": [12.5, 12.5, 582.5, 829.5],
     "Margins": [12, 12],
     "MediaPosition": 0,
     "NumCopies": 1,
     "Duplex": false,
     "Tumble": false,
-    "cupsWidth": 2379,
-    "cupsHeight": 3408,
-    "cupsBytesPerLine": 298,
+    "cupsWidth": 2375,
+    "cupsHeight": 3404,
+    "cupsBytesPerLine": 297,
     "cupsBitsPerColor": 1,
     "cupsBitsPerPixel": 1,
     "cupsColorOrder": 0,
@@ -32,6 +32,7 @@
     "page_width_pixels": 2480,
     "band_width_bytes": 310,
     "band_height_lines": 64,
+    "hard_margin_pt": 12.5,
     "hard_margin_bytes": 7,
     "dst_offset_bytes": 0,
     "src_skip_bytes": 1,
@@ -42,6 +43,6 @@
   "ppd_source": {
     "PageSize": "A4",
     "PaperDimension": "595 842",
-    "ImageableArea": "12 12 583 830"
+    "ImageableArea": "12.5 12.5 582.5 829.5"
   }
 }

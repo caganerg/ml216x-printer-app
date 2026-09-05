@@ -1,3 +1,4 @@
+mod media;
 pub mod raster;
 pub mod spl;
 
@@ -400,17 +401,11 @@ fn compute_page_height_lines(page_size_pt: u32, y_dpi: u32) -> u32 {
 /// hardMarginXInB = hardMarginX / 8;
 /// ```
 ///
-/// SpliX bu değeri PPD'nin `*ImageableArea` sol kenar boşluğundan alır
-/// (`printer.cpp`: `_hardMarginX = value.marginX()`). Bu filtre PPD'yi
-/// okumadığı için aynı sayıyı CUPS Raster başlığının `Margins[0]` alanından
-/// alıyor: cups-filters oraya tam olarak seçilen `*ImageableArea`nın sol
-/// kenar boşluğunu (bu projenin PPD'sinde 12 pt) yazar.
-///
-/// 8'e yukarı hizalama SpliX'ten birebir alındı ve önemlidir: 12 pt @600 DPI
-/// = 100 piksel, hizalandığında 104 piksel = 13 bayt olur. 12,5'e yuvarlanmış
-/// bir değer bantı yarım bayt kaydırırdı ki bant tamponu bayt adreslidir.
-fn hard_margin_bytes(margin_pt: u32, x_dpi: u32) -> usize {
-    let px = (margin_pt as f64 * x_dpi as f64 / 72.0).ceil() as u32;
+/// The source is the driver constant, not integer CUPS Margins[]. This keeps
+/// the selected 12.5 pt value intact: CUPS' integer field cannot represent it.
+/// See docs/DECISIONS.md (2026-09-06). At 600 dpi it is 14 byte columns.
+fn hard_margin_bytes(margin_pt: f64, x_dpi: u32) -> usize {
+    let px = (margin_pt * x_dpi as f64 / 72.0).ceil() as u32;
     (((px + 7) & !7u32) / 8) as usize
 }
 
@@ -799,6 +794,24 @@ fn process_cups_raster_to_spl<W: Write>(
     writer: W,
     service_date: &str,
 ) -> io::Result<()> {
+    process_with_margin(args, reader, writer, service_date, media::HARD_MARGIN_PT)
+}
+
+// The production path always supplies the driver constant. The explicit input
+// also preserves synthetic geometry cases in the golden harness.
+fn process_with_margin<W: Write>(
+    args: &CupsFilterArgs,
+    reader: Box<dyn Read>,
+    writer: W,
+    service_date: &str,
+    margin_pt: f64,
+) -> io::Result<()> {
+    if !margin_pt.is_finite() || margin_pt <= 0.0 || margin_pt > 36.0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid driver hard margin",
+        ));
+    }
     // 1. CUPS Raster başlık/magic kontrolü (RaSt, RaS2, RaS3 vb.)
     let mut raster_reader = CupsRasterReader::new(reader)?;
 
@@ -925,7 +938,7 @@ fn process_cups_raster_to_spl<W: Write>(
         // CUPS raster verisi (595B) bant genişliğinde (620B) ortalanır, sonra
         // yazıcının sert kenar boşluğu düşülür; bkz. `band_placement`.
         let cups_line_bytes = header.bytes_per_line as usize;
-        let hard_margin = hard_margin_bytes(header.margins[0], header.hw_resolution[0]);
+        let hard_margin = hard_margin_bytes(margin_pt, header.hw_resolution[0]);
         let placement = band_placement(band_width_bytes as usize, cups_line_bytes, hard_margin)?;
         if (band_width_bytes as usize) < cups_line_bytes {
             // Uyarı yerleşimden SONRA basılıyor, çünkü hangi kenarın kırpıldığı
@@ -1947,12 +1960,16 @@ mod tests {
     /// ve bant bir bayt kayar.
     #[test]
     fn test_hard_margin_matches_splix_alignment() {
+        assert_eq!(hard_margin_bytes(media::HARD_MARGIN_PT, 300), 7);
+        assert_eq!(hard_margin_bytes(media::HARD_MARGIN_PT, 600), 14);
+        assert_eq!(hard_margin_bytes(media::HARD_MARGIN_PT, 1200), 27);
+
         // Bu projenin PPD'sindeki *ImageableArea sol kenar boşluğu: 12 pt.
-        assert_eq!(hard_margin_bytes(12, 600), 13);
-        assert_eq!(hard_margin_bytes(12, 300), 7);
-        assert_eq!(hard_margin_bytes(12, 1200), 25);
+        assert_eq!(hard_margin_bytes(12.0, 600), 13);
+        assert_eq!(hard_margin_bytes(12.0, 300), 7);
+        assert_eq!(hard_margin_bytes(12.0, 1200), 25);
         // Kenar boşluğu bildirilmemişse kaydırma da yok.
-        assert_eq!(hard_margin_bytes(0, 600), 0);
+        assert_eq!(hard_margin_bytes(0.0, 600), 0);
     }
 
     /// D-06 regresyonu: yatay yerleşim ORTALAMA EKSİ SERT KENAR BOŞLUĞU
@@ -1966,7 +1983,7 @@ mod tests {
     fn test_band_placement_subtracts_hard_margin() {
         // A4 @600 DPI, bu projenin PPD'sindeki gerçek sayılar:
         // bant 620 B, CUPS satırı 595 B, sert kenar boşluğu 13 B.
-        let a4 = band_placement(620, 595, hard_margin_bytes(12, 600)).unwrap();
+        let a4 = band_placement(620, 595, hard_margin_bytes(12.0, 600)).unwrap();
         assert_eq!(
             a4,
             BandPlacement {
@@ -2079,16 +2096,14 @@ mod tests {
         let columns = nonzero_columns_in_first_line(&band, QPDL_BAND_HEIGHT);
         assert_eq!(
             columns,
-            vec![2],
+            vec![1],
             "işaret baytı yanlış sütunda; 15 ise sert kenar boşluğu düşülmüyor"
         );
     }
 
-    /// Kenar boşluğu bildirmeyen bir akış (ör. PPD'siz üretilmiş raster) eski
-    /// saf-ortalama davranışını korumalı: düzeltme `Margins[0]`'a bağlıdır ve
-    /// alan yoksa bir şey uydurmaz.
+    /// Missing integer header margins must not remove the 12.5 pt driver margin.
     #[test]
-    fn test_content_placement_without_margins_is_pure_centering() {
+    fn test_missing_header_margin_still_uses_driver_constant() {
         const MARKER_INDEX: usize = 3;
         let mut spec = RasterSpec::a4(600, 600, 8);
         spec.width_px = 4760;
@@ -2101,7 +2116,7 @@ mod tests {
         let out = run_filter(spec.build());
         let band = first_band_buffer(&out);
         let columns = nonzero_columns_in_first_line(&band, QPDL_BAND_HEIGHT);
-        assert_eq!(columns, vec![12 + MARKER_INDEX]);
+        assert_eq!(columns, vec![MARKER_INDEX - 2]);
     }
 
     /// Yatay ve dikey eksen AYNI origin'i kullanmalı.
@@ -2115,10 +2130,9 @@ mod tests {
         let mut spec = RasterSpec::a4(600, 600, 8);
         spec.width_px = 4760;
         spec.margin_left_pt = 12;
-        // Satırın ilk baytı işaretli: src_skip = 1 olduğu için 1. bayt
-        // 0. sütuna düşer.
+        // With 14 margin bytes and 12 centring bytes, source byte 2 lands at column 0.
         let mut pattern = vec![0u8; 595];
-        pattern[1] = 0xFF;
+        pattern[2] = 0xFF;
         spec.line_pattern = Some(pattern);
 
         let out = run_filter(spec.build());

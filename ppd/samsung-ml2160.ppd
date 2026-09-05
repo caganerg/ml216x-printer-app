@@ -98,17 +98,17 @@
 *CloseUI: *PageRegion
 
 *DefaultImageableArea: A4
-*ImageableArea A4/A4: "12 12 583 830"
-*ImageableArea Letter/US Letter: "12 12 600 780"
-*ImageableArea Legal/US Legal: "12 12 600 996"
-*ImageableArea Executive/Executive: "12 12 510 744"
-*ImageableArea A5/A5: "12 12 408 583"
-*ImageableArea A6/A6: "12 12 285 408"
-*ImageableArea B5/JIS B5: "12 12 504 717"
-*ImageableArea Env10/No. 10 Envelope: "12 12 285 672"
-*ImageableArea EnvDL/DL Envelope: "12 12 300 612"
-*ImageableArea EnvC5/C5 Envelope: "12 12 447 637"
-*ImageableArea Folio/Folio: "12 12 583 923"
+*ImageableArea A4/A4: "12.5 12.5 582.5 829.5"
+*ImageableArea Letter/US Letter: "12.5 12.5 599.5 779.5"
+*ImageableArea Legal/US Legal: "12.5 12.5 599.5 995.5"
+*ImageableArea Executive/Executive: "12.5 12.5 509.5 743.5"
+*ImageableArea A5/A5: "12.5 12.5 407.5 582.5"
+*ImageableArea A6/A6: "12.5 12.5 284.5 407.5"
+*ImageableArea B5/JIS B5: "12.5 12.5 503.5 716.5"
+*ImageableArea Env10/No. 10 Envelope: "12.5 12.5 284.5 671.5"
+*ImageableArea EnvDL/DL Envelope: "12.5 12.5 299.5 611.5"
+*ImageableArea EnvC5/C5 Envelope: "12.5 12.5 446.5 636.5"
+*ImageableArea Folio/Folio: "12.5 12.5 582.5 922.5"
 
 *DefaultPaperDimension: A4
 *PaperDimension A4/A4: "595 842"

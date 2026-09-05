@@ -13,15 +13,15 @@
     "cupsPageSizeName": "Folio",
     "HWResolution": [1200, 600],
     "PageSize": [595, 935],
-    "ImagingBoundingBox": [12, 12, 583, 923],
+    "ImagingBoundingBox": [12.5, 12.5, 582.5, 922.5],
     "Margins": [12, 12],
     "MediaPosition": 0,
     "NumCopies": 1,
     "Duplex": false,
     "Tumble": false,
-    "cupsWidth": 9517,
-    "cupsHeight": 7592,
-    "cupsBytesPerLine": 1190,
+    "cupsWidth": 9500,
+    "cupsHeight": 7583,
+    "cupsBytesPerLine": 1188,
     "cupsBitsPerColor": 1,
     "cupsBitsPerPixel": 1,
     "cupsColorOrder": 0,
@@ -32,9 +32,10 @@
     "page_width_pixels": 9920,
     "band_width_bytes": 1240,
     "band_height_lines": 128,
-    "hard_margin_bytes": 25,
+    "hard_margin_pt": 12.5,
+    "hard_margin_bytes": 27,
     "dst_offset_bytes": 0,
-    "src_skip_bytes": 0,
+    "src_skip_bytes": 1,
     "paper_size_code": 24,
     "paper_source_code": 1,
     "copies_sent": 1
@@ -42,6 +43,6 @@
   "ppd_source": {
     "PageSize": "Folio",
     "PaperDimension": "595 935",
-    "ImageableArea": "12 12 583 923"
+    "ImageableArea": "12.5 12.5 582.5 922.5"
   }
 }

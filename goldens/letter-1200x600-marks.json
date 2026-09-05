@@ -13,15 +13,15 @@
     "cupsPageSizeName": "Letter",
     "HWResolution": [1200, 600],
     "PageSize": [612, 792],
-    "ImagingBoundingBox": [12, 12, 600, 780],
+    "ImagingBoundingBox": [12.5, 12.5, 599.5, 779.5],
     "Margins": [12, 12],
     "MediaPosition": 0,
     "NumCopies": 1,
     "Duplex": false,
     "Tumble": false,
-    "cupsWidth": 9800,
-    "cupsHeight": 6400,
-    "cupsBytesPerLine": 1225,
+    "cupsWidth": 9783,
+    "cupsHeight": 6392,
+    "cupsBytesPerLine": 1223,
     "cupsBitsPerColor": 1,
     "cupsBitsPerPixel": 1,
     "cupsColorOrder": 0,
@@ -32,9 +32,10 @@
     "page_width_pixels": 10200,
     "band_width_bytes": 1275,
     "band_height_lines": 128,
-    "hard_margin_bytes": 25,
+    "hard_margin_pt": 12.5,
+    "hard_margin_bytes": 27,
     "dst_offset_bytes": 0,
-    "src_skip_bytes": 0,
+    "src_skip_bytes": 1,
     "paper_size_code": 0,
     "paper_source_code": 1,
     "copies_sent": 1
@@ -42,6 +43,6 @@
   "ppd_source": {
     "PageSize": "Letter",
     "PaperDimension": "612 792",
-    "ImageableArea": "12 12 600 780"
+    "ImageableArea": "12.5 12.5 599.5 779.5"
   }
 }
