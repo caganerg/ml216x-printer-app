@@ -1,4 +1,4 @@
-# samsung-ml2160-rust
+# ml216x-printer-app
 
 A PAPPL Printer Application for the Samsung ML-2160, ML-2165, ML-2165W and
 ML-2168 protocol family. It accepts jobs over IPP and emits SPL2/QPDL through
