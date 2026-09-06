@@ -129,9 +129,16 @@ stream, a single flipped bit, and the old resolution order.
    `MFG:Samsung;MDL:ML-2160 Series;CMD:SPL,FWV,EXT;` and says nothing about
    USB IDs. Take them from `lsusb` at bring-up (P12) and write the rule then.
    Socket transport, by contrast, is proven end to end.
-2. **Packaging for the printer application**: `packaging/debian/control` still
-   describes the 1.x filter, and there is no service unit, no user, and no udev
-   rule for the USB case.
+2. ~~**Packaging for the printer application**~~ — **done**, except the USB
+   permission story, which waits on the same missing IDs as item 1. The `.deb`
+   installs `/usr/bin/ml216x-printer-app` and a systemd unit and ships neither
+   filter nor PPD (Q-5's clean break for what we ship); dependencies are stated
+   explicitly, because the hand-built package path never substitutes
+   `${shlibs:Depends}` — the old control would have shipped that literal string
+   to users. `scripts/build-deb.sh` builds it and checks the libpappl range
+   first. The service runs as root for now, with the reason written in the unit
+   file. The maintainer scripts pass `sh -n` but have not been executed: doing
+   so installs a system service on the development machine.
 3. **P9's raster-type and dithering review.** Note what the source reading
    turned up for it: with `force_raster_type = BLACK_1`, PAPPL selects a dither
    matrix by quality and content, and `image/jpeg` and `image/png` reach the
