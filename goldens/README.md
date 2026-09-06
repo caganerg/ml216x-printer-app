@@ -8,6 +8,11 @@ records the exact driver margin separately from truncated integer CUPS fields.
 See `docs/GOLDEN-VALIDATION.md` for the audit of this refresh.
 
 
+**2026-09-06, P6:** the SPL2 engine moved to `crates/spl2-core` and the frozen
+filter now drives it through `spl2_core::engine`. All 32 streams are byte
+identical across that move and `SHA256SUMS` is unchanged, which is the whole
+point of capturing them before the split.
+
 This directory freezes **the SPL2/QPDL bytes the 1.x CUPS filter produces**
 before the move to a PAPPL Printer Application. The acceptance criterion is
 byte-for-byte identity (project rule 6), and that criterion needs a reference

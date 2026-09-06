@@ -2,29 +2,46 @@
 
 *Updated 2026-09-06.*
 
-**P5 is implemented and exercised.** The maintainer selected **12.5 pt on
-all edges** and authorized the next step. This follows SpliX's ML-2165
-setting; it is provisional for the family, not a hardware measurement.
-G-1 remains open per model. Do not ask again for permission to use 12.5 pt.
+**P6 is implemented: `spl2-core` is extracted and the SPL2 callbacks are
+connected.** The printer application now emits real SPL2/QPDL through PAPPL.
+No hardware print has been performed and release gate G-1 is still open, per
+model; 12.5 pt remains the maintainer's selection, not a measurement.
+Do not ask again for permission to use 12.5 pt.
 
 ## Current code
 
-- `src/media.rs`: shared 12.5 pt driver constant. The transitional filter
-  preserves fractional points and no longer derives hard margins from integer
-  CUPS `Margins[]`. This is the maintainer-authorized exception to freezing 1.x.
-- `goldens/`: 32 cases refreshed with this intentional behaviour change.
-  30 SPL streams changed; two synthetic SPL streams stayed identical. All
-  sidecars now record `hard_margin_pt`. Original 12 pt evidence is historical.
-- `pappl-sys`: native CUPS page header fields now bound and checked against
-  the C probe (49 additional fields); four additional CUPS/IPP constants.
-- `pappl::application`: minimal mainloop, loopback system, driver capability
-  registration, file-only geometry callbacks and strict R-6/H option checks.
-  Driver descriptors live through mainloop teardown: PAPPL stores their pointer.
-- `ml216x-printer-app`: new unsafe-free binary, eleven media, four resolution
-  pairs, two sources, fourteen media types, BLACK_1 and explicit one-sided.
-  Real SPL2 output is **not connected**; normal jobs fail with an explanation.
-- `scripts/p5-probe.py`: real IPP/PWG integration matrix and `/dev/full`
-  failure test. Uses temporary spool/config/output and stops its server.
+- `crates/spl2-core`: the protocol engine, `#![forbid(unsafe_code)]` and
+  dependency free. `qpdl` (was `src/spl.rs`), `geometry` (the pure half of
+  `src/main.rs`), `engine` (the shared page/band seam), `media`, `log`, and
+  `raster` behind the non-default `golden-replay` feature (Q-6). The frozen
+  filter and the printer application drive the same code, so they cannot
+  drift apart without a golden turning red.
+- `src/main.rs`: now only the CUPS filter front end — argv, stdin, stderr and
+  the page loop. All 32 goldens are byte identical across the split, and
+  `goldens/SHA256SUMS` verifies unchanged.
+- `crates/pappl`: owns the C boundary only. `RasterDriver` is the seam; the
+  crate stays `Apache-2.0 OR MIT` because the GPL engine is linked by the
+  binary, not by it (Q-8a). `RasterOptions` is validated at the boundary, so a
+  driver cannot read an unchecked field.
+- `crates/ml216x-printer-app`: `Spl2Driver` turns PAPPL raster jobs into QPDL;
+  `media_table` holds the capability table with its PPD cross-checks. Job state
+  is keyed by job id and dropped by `abandon_job`, so a failed job cannot leave
+  a half-written stream for the next one. `--probe` still selects the P5
+  geometry probe unchanged.
+- `scripts/p5-probe.py`: three modes now. The default reproduces
+  `docs/P5-MEASUREMENTS.json` byte for byte, `--spl` runs the same 17-case
+  matrix through the SPL2 driver and checks the QPDL page headers, and
+  `--device-failure` still requires job-state=aborted.
+
+## The geometry adaptation, in one paragraph
+
+PAPPL delivers full media; cups-filters delivers the printable area. The
+horizontal axis needs no new rule — `band_placement`'s centring term is zero
+for a sheet-wide line, leaving exactly the hard-margin subtraction the classic
+path performs, and a test asserts the two paths place the sheet identically
+across all 11 media and 4 resolutions. The vertical axis has no precedent in
+the tree: the top margin is dropped and the page cut to the printable height.
+That is open question **Q-13**, and G-1 must measure it.
 
 ## P5 findings that the next step must use
 
@@ -44,14 +61,17 @@ G-1 remains open per model. Do not ask again for permission to use 12.5 pt.
 
 ## Next work
 
-Extract `spl2-core`, adapt the full-media raster path, and connect SPL2 job,
-page and band callbacks while preserving the new golden baseline. Keep the
-original filter in-tree until P11 passes; keep the PPD permanently. USB then
-socket remain required for the final application. Hardware G-1 and the P9
-raster/dithering review remain outstanding. No hardware print was performed.
+Device transport: USB first, then socket (Q-10). Today the application can only
+reach a `file://` destination, so nothing has been sent to a printer. Then P9's
+raster-type and dithering review — the probe measured BLACK_1/PWG only, and
+nothing characterises what PAPPL's PNG or JPEG conversion produces. Keep the
+original filter in-tree until P11 passes; keep the PPD permanently. Hardware
+G-1 and open questions Q-12 and Q-13 remain outstanding. No hardware print was
+performed.
 
 Checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
-`cargo fmt --all --check`, golden checksums and both P5 integration modes.
+`cargo fmt --all --check`, golden checksums, and all three `p5-probe.py` modes
+(default, `--spl`, `--device-failure`).
 
 ## Step numbering
 
@@ -68,6 +88,7 @@ the prompt series has not named, and are left blank rather than guessed.
 | P3 | `pappl-sys`: hand-written FFI **and** the size/offset/enum layout harness | P3 + P6 |
 | P4 | `pappl`: the safe wrapper and the `catch_unwind` callback shim | P7 |
 | P5 | Minimal PAPPL app; the printable-area vs full-media experiment (`docs/MARGINS.md`) | — |
+| P6 | `spl2-core` extraction and the SPL2 raster callbacks | — |
 | P9 | Raster-type decision, and the dithering-exposure question | — |
 | P11 | The gate after which the frozen 1.x filter may be removed (Q-5) | — |
 | P12 | Hardware bring-up; release gate G-1, the physical margin measurement | P12 |

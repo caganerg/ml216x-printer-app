@@ -8,4 +8,5 @@ license = "GPL-2.0-only"
 publish = false
 
 [dependencies]
+spl2-core = { path = "../spl2-core" }
 pappl = { path = "../pappl" }

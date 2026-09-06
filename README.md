@@ -1,11 +1,23 @@
 # samsung-ml2160-rust
-> **2.0 development:** the PAPPL mainloop and P5 geometry probe are implemented.
-> Actual SPL2 printing through PAPPL is not connected yet. The transitional
-> filter and PPD now use the maintainer-selected **12.5 pt** margins; physical
-> validation is still required. The original 1.x release remains on
+> **2.0 development:** the SPL2 engine is now a crate (`spl2-core`) shared by
+> the frozen 1.x filter and the PAPPL printer application, and the raster
+> callbacks emit real SPL2/QPDL. There is still **no device transport**, so the
+> application can only print to a `file://` destination, and no page has been
+> printed on hardware: the **12.5 pt** margins are the maintainer's selection,
+> not a measurement (release gate G-1). The original 1.x release remains on
 > `legacy/cups-filter-1.x` / `v1.x-final`.
 
-## PAPPL development (P5)
+## Workspace
+
+| Crate | Licence | What it is |
+|---|---|---|
+| `spl2-core` | GPL-2.0-only | The SPL2/QPDL v3 engine: PJL envelope, page header, Algo 0x11 bands. No C, no I/O, no dependencies. Byte-for-byte frozen by `goldens/`. |
+| `pappl-sys` | Apache-2.0 OR MIT | Hand-written FFI to libpappl, with a C layout probe checking every offset. |
+| `pappl` | Apache-2.0 OR MIT | The safe wrapper: RAII handles, the `catch_unwind` callback shim, and the `RasterDriver` seam. |
+| `ml216x-printer-app` | GPL-2.0-only | The printer application: capability table and the SPL2 driver. |
+| `rastertospl-rust` (root) | GPL-2.0-only | The frozen 1.x CUPS filter front end. |
+
+## PAPPL development (P5/P6)
 
 Build dependencies: Rust 1.77+, `pkg-config`, a C compiler, `libpappl-dev`
 (1.3.x; tested with 1.3.1), and `libcups2-dev`. Run the integration experiment
@@ -14,8 +26,13 @@ with `ipptool` from `cups-ipp-utils` installed:
 ```sh
 cargo build -p ml216x-printer-app
 python3 scripts/p5-probe.py --output /tmp/p5-measurements.json
+python3 scripts/p5-probe.py --spl --output /tmp/p5-spl.json
 python3 scripts/p5-probe.py --device-failure --output /tmp/p5-failure.json
 ```
+
+The default run reproduces `docs/P5-MEASUREMENTS.json` byte for byte. `--spl`
+runs the same 17 media/resolution cases through the SPL2 driver and checks the
+QPDL page header each job produced.
 
 For manual inspection, explicitly start the probe server in one terminal:
 
@@ -33,14 +50,18 @@ and medium explicitly:
   -o printer-resolution=600dpi -o media=iso_a4_210x297mm page.pwg
 ```
 
-The probe writes JSON Lines, permits only file destinations, and binds TCP to
-127.0.0.1. Stop it with Ctrl-C or the `shutdown` subcommand and the same `-u`
-server URI. Real print jobs are refused until the encoder adapter is connected.
-PAPPL's auto-start command does not preserve these custom flags, so start the
-probe with the explicit `server` command above.
+`--probe` writes JSON Lines and permits only `file:///` destinations; without
+it the same command emits SPL2/QPDL to whatever destination the URI names. Both
+bind TCP to 127.0.0.1. Stop the server with Ctrl-C or the `shutdown`
+subcommand and the same `-u` server URI. PAPPL's auto-start command does not
+preserve these custom flags, so use the explicit `server` command above.
 
-The 17-case experiment measured **full-media raster with zero header margins**.
-See [margin decision and measured results](docs/MARGINS.md) and
+The 17-case experiment measured **full-media raster with zero header margins**,
+so the driver subtracts the hard margin on both axes before handing the page to
+the engine; the horizontal half is asserted to place the sheet exactly as the
+classic filter does, and the vertical half is open question Q-13. See
+[margin decision and measured results](docs/MARGINS.md),
+[the decision log](docs/DECISIONS.md) and
 [current migration state](docs/SESSION-STATE.md). P9 must still review raster
 conversion/dithering and input-versus-job geometry before real printing.
 

@@ -1,9 +1,18 @@
 # ML-216x: CUPS Filter → PAPPL Printer Application — Repository Audit & Migration Plan
 
-Current progress (2026-09-06): **P1–P5 implemented**, with a file-only P5
-geometry probe. The maintainer selected 12.5 pt and authorized the golden
-refresh. See `SESSION-STATE.md`, `DECISIONS.md` and `MARGINS.md` for current
-state. The baseline audit and its original recommendations below are historical.
+Current progress (2026-09-06): **P1–P6 implemented**. `spl2-core` is extracted
+and the SPL2 raster callbacks are connected; the application emits real QPDL to
+a `file://` destination, and no hardware transport exists yet. The maintainer
+selected 12.5 pt and authorized the golden refresh. See `SESSION-STATE.md`,
+`DECISIONS.md` and `MARGINS.md` for current state. The baseline audit and its
+original recommendations below are historical.
+
+Two deviations from §7's proposed layout, both deliberate: `src/spl.rs` moved
+to a single `qpdl` module rather than being split into seven files, because the
+split is cosmetic and the move had to be byte-for-byte safe; and the band loop
+takes pushed scanlines rather than a line-source trait, because PAPPL pushes
+and the filter can drive a push interface in a loop, while the reverse is not
+true.
 
 Original status: **audit only, no code changed.**
 Baseline commit: `33d4ff2` (`main`, clean tree).
@@ -174,7 +183,7 @@ Everything below is in `src/spl.rs` unless noted.
 ### Geometry that shapes the output (in `main.rs`)
 - `compute_page_width_pixels` (`:367`) — SpliX `((ceil(pt*dpi/72)) + 7) & ~7`
 - `compute_page_height_lines` (`:383`) — vertical equivalent, **no 8-alignment**, uses `hw_resolution[1]`
-- `hard_margin_bytes` (`:406`) — SpliX `hardMarginXInB`; 12 pt @ 600 dpi → 104 px → 13 bytes
+- `hard_margin_bytes` (now `crates/spl2-core/src/geometry.rs`) — SpliX `hardMarginXInB`; 12.5 pt @ 600 dpi → 105 px → 112 aligned → 14 bytes
 - `band_placement` (`:449`) — centring minus hard margin, as a signed offset split into `dst_offset`/`src_skip`
 - `band_height_for` (`:587`) — 128, halved to 64 **only** when both axes are 300 dpi
 - `stream_page_bands` (`:1043`) — column-major (transposed) band fill `band[col * band_height + y]`, then **unconditional bitwise inversion** of every byte (CUPS K 1=black vs Samsung 0=black)
@@ -251,7 +260,7 @@ option the user actually picks; the offset column is the byte offset decoded by
 | **Paper source** | `*InputSlot` — Auto (default), Manual | `MediaPosition` @324 | `SplPaperSource::from_media_position` (`spl.rs:123`) | Page-header `0x9`. `0`/`1` → Auto; unknown → Auto + warning. |
 | **Copies** | (no PPD option; comes from the job) | `NumCopies` @340 | `sanitize_copies` (`main.rs:740`) | Page-header `0x2..0x4` **and** the end-of-page footer. Clamped to `1..=999` (`MAX_REALISTIC_COPIES`). |
 | **Duplex / binding edge** | **no `*OpenUI *Duplex` block in the PPD** | `Duplex` @272, `Tumble` @368 | `duplex_mode` (`main.rs:516`) | `@PJL SET DUPLEX=OFF\|ON\|MANUAL` + `BINDING=`, page-header `0xB`/`0xC`. **Currently unreachable** — with no PPD option, `Duplex` is never set, so every job is Simplex. The mapping is kept ready; `main.rs:509` and `main.rs:968` document two unfinished pieces (manual-duplex tray override needs last-page knowledge; two-pass page ordering is not implemented). |
-| **Hard margin** | `*ImageableArea` (12 pt left in every entry) | `Margins[0]` @312 | `hard_margin_bytes` (`main.rs:406`), `band_placement` (`main.rs:449`) | Horizontal placement of content within the band. Not user-selectable, but user-visible if wrong. |
+| **Hard margin** | the driver constant `spl2_core::media::HARD_MARGIN_PT` (12.5 pt since 2026-09-06; `*ImageableArea` mirrors it) | not read from the header any more | `hard_margin_bytes`, `hard_margin_lines`, `band_placement` (`crates/spl2-core/src/geometry.rs`) | Placement of content within the band, on both axes. Not user-selectable, but user-visible if wrong. |
 | **Colour space / depth** | `*ColorDevice: False` | `cupsColorSpace` @400, `BitsPerColor` @384, `BitsPerPixel` @388, `cupsColorOrder` @396 | `validate_page_header` | Not an option — anything other than 1-bit K is **rejected**. |
 | `cupsCompression` | — | @404 | ignored (`main.rs:839`) | Deliberately ignored with a one-shot warning; band compression is always Algo 0x11. |
 

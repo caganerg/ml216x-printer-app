@@ -37,6 +37,23 @@ marks and four inset marks. Raw evidence: [`P5-MEASUREMENTS.json`](P5-MEASUREMEN
 unchanged, so PAPPL has not cropped away the hard margins. This does not yet
 characterize PNG/JPEG conversion or other raster types (P9).
 
+**Resolved in P6 (2026-09-06).** The encoder adapter now does this, and how it
+does it matters more than that it does:
+
+- *Horizontally, nothing new was needed.* `band_placement` centres the incoming
+  line in the sheet-wide band and then subtracts the hard margin. When the line
+  already spans the sheet, the centring term is zero and only the subtraction
+  survives — which is the same sheet-to-engine mapping the classic path
+  performs. So the guard against subtracting twice is to feed the real line
+  width, not to special-case the PWG path. A test asserts the two paths place
+  the sheet identically across all 11 media and all 4 resolutions.
+- *Vertically there was no precedent*, because the classic path's centring and
+  `hardMarginY` cancelled. The driver drops the top margin and cuts the page to
+  the printable height, rounding to the nearest scanline. See **Q-13** in
+  `docs/DECISIONS.md`: this is the one geometry value on the path that is an
+  estimate rather than a transcription, and **G-1 must measure the vertical
+  margin as well as the horizontal one.**
+
 Consequences for the next encoder adapter:
 
 - Distinguish PWG full-sheet input from the classic PPD printable-area input;

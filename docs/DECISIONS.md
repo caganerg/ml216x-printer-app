@@ -14,7 +14,105 @@ answered. **Q-7 exists and is decided:** it asked whether the .deb should link
 libpappl statically or dynamically, and it is answered under Q-7 below (and
 folded into Q-1, which settled the same matter). Counting the decided entries
 as ten and treating Q-7 as unaccounted for is the arithmetic slip this note
-exists to prevent.
+exists to prevent. **Q-12** and **Q-13** were added later, by review and by
+implementation rather than by the migration plan, and are the only entries
+outside the Q-1..Q-11 range.
+
+---
+
+## 2026-09-06 — Q-13 (OPEN): the vertical hard margin has no precedent in the tree
+
+Raised while connecting the SPL2 callbacks (P6). It is the one number on the
+new path that could not be derived from existing code, so it is written up
+rather than buried in a commit.
+
+**What is settled.** Horizontally, nothing new was needed. `band_placement`
+centres the incoming line in the sheet-wide band and then subtracts the hard
+margin; when the line already spans the sheet — which is what PAPPL delivers —
+the centring term is zero and the subtraction alone survives. That is exactly
+the sheet-to-engine mapping the classic path performs, so the same physical
+byte column lands in the same band column on both paths. A test asserts this
+across all 11 media and all 4 resolutions
+(`full_media_and_printable_area_place_the_sheet_identically`), and it is what
+stops the "subtract the margin twice" trap `docs/MARGINS.md` warns about.
+
+**What is not settled.** Vertically the 1.x filter subtracts nothing at all,
+because cups-filters handed it the printable area already centred on the sheet
+and, as `docs/MARGINS.md` records, centring and `hardMarginY` "cancel exactly".
+PAPPL delivers full media, so that cancellation is gone and the printer
+application has to drop the top margin itself. There is no quoted SpliX line
+and no existing call site for that number, which makes it the first geometry
+value on this path that is an estimate rather than a transcription.
+
+`hard_margin_lines` currently rounds to the nearest scanline: at 600 dpi
+12.5 pt is 104.17 lines, so it drops 104 and the page is cut to
+`height - 2 x 104`. Candidate resolutions:
+
+- **(a) Nearest scanline (implemented).** 104 lines lands 0.17 lines low, and
+  it is also what cups-filters' own centring implies for the classic path, so
+  the two front ends stay within one scanline of each other on every medium —
+  asserted in points, not lines, by `cropped_height_matches_the_printable_area`.
+- **(b) `ceil`, mirroring `hard_margin_bytes`.** 105 lines, which lands 0.83
+  lines high. Consistent-looking, but the `ceil` in the horizontal rule exists
+  to reach a byte boundary and is free there because both sides of the
+  placement use it; neither reason applies to a scanline.
+- **(c) Do not crop at all** and send the full sheet, letting the last 12.5 pt
+  fall past the printable area. Rejected without hardware: it declares a page
+  taller than the engine can print, which is the class of mismatch `D-01`/`D-02`
+  exist to refuse.
+
+**Expectation: (a)**, and the difference between (a) and (b) is 0.04 mm, far
+below what G-1's ruler will resolve. The reason to record it anyway is that
+being wrong about the *rule* rather than the rounding — cropping the wrong
+edge, or not cropping — is a 4.4 mm error, and nothing in the tree would
+catch it. **G-1 must therefore measure the vertical margin on a PAPPL-printed
+page, not only the horizontal one**, and `docs/GOLDEN-VALIDATION.md`'s gate
+text should say so when Q-12 is settled.
+
+---
+
+## 2026-09-06 — Q-12 (OPEN): release gate G-1 still names the superseded 12 pt margin
+
+Raised by a post-commit review of `eba7b09`, not by the maintainer. The 12.5 pt
+refresh marked sections 1-3 of `GOLDEN-VALIDATION.md` as historical but did not
+touch section 4, which therefore still reads as current while stating that the
+corpus "derives its margin from the same 12 pt `*ImageableArea` value" and that
+**G-1** measures against "`*ImageableArea` (12 pt = 4.23 mm on every medium)".
+The PPD now declares 12.5 pt = 4.41 mm. G-1 is the condition on shipping 2.0,
+so whoever performs it would measure against a value the tree no longer uses,
+and the 0.5 pt (0.18 mm) difference is inside the range that measurement exists
+to resolve.
+
+A second, smaller instance of the same drift: each sidecar's
+`cups_page_header.ImagingBoundingBox` now prints fractional points
+(`[12.5, 12.5, ...]`) while the binary CUPS header the case actually builds
+stores the truncated integer `12`, and the `Margins` field beside it in the same
+block prints `12`. `goldens/README.md` states that every sidecar records the
+driver margin "separately from truncated integer CUPS fields"; the
+`ImagingBoundingBox` line sits inside the CUPS-header block and is not
+truncated, so the block does not describe the header bytes it documents. No SPL
+output depends on it: the filter no longer reads either field.
+
+Candidate resolutions:
+
+- **(a) Restate section 4 and G-1 at 12.5 pt (4.41 mm)**, and print
+  `ImagingBoundingBox` in the sidecar exactly as the header stores it, leaving
+  the fractional value in `ppd_source` and `derived_qpdl.hard_margin_pt`.
+- **(b) Mark section 4 historical** the way sections 1-3 were marked, and write
+  the gate afresh in a new dated section.
+- **(c) Change nothing**, treating section 4 as a record of the 12 pt corpus and
+  `MARGINS.md` as the current statement of the margin.
+
+**Expectation: (a) for the gate.** G-1 is a release condition rather than a
+record, so it should name the value that will actually be on paper; (c) leaves
+the one document a person reads before measuring pointing at a superseded
+number. Either (a) or (b) settles the sidecar question the same way.
+
+Related evidence gathered in the same review: R-1 (`hard_margin_bytes` returning
+one byte too many) was re-injected against the **refreshed** corpus and
+`golden::test_goldens_match` still fails, so the harness is still proven to go
+red for the risk this change touched. `GOLDEN-VALIDATION.md`'s note that the
+mutation results were not rerun remains accurate for R-2 to R-5.
 
 ---
 

@@ -3,7 +3,7 @@
 [workspace]
 # The 1.x filter stays the root package until P11 is green (decision Q-5);
 # the 2.0 crates are added here as they are written.
-members = ["crates/pappl-sys", "crates/pappl", "crates/ml216x-printer-app"]
+members = ["crates/spl2-core", "crates/pappl-sys", "crates/pappl", "crates/ml216x-printer-app"]
 
 [package]
 name = "samsung-2160-rust"
@@ -14,6 +14,10 @@ description = "CUPS/PWG Raster Filter for Linux printing architecture"
 license = "GPL-2.0-only"
 
 [dependencies]
+# The frozen filter now drives the shared engine, so the goldens it produces
+# and the ones the printer application will produce come from the same code.
+# It needs the classic CUPS Raster parser, hence `golden-replay` (Q-6).
+spl2-core = { path = "crates/spl2-core", features = ["golden-replay"] }
 
 [[bin]]
 name = "rastertospl-rust"

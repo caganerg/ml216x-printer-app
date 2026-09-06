@@ -11,8 +11,11 @@
 //! `CupsLineDecoder` tarafından şeffaf biçimde çözülür. Çağıran taraf her
 //! durumda `CupsRasterReader::read_line` kullanır ve farkı görmez.
 
-use std::fmt;
 use std::io::{self, Read};
+
+// Moved to `geometry` during the crate split: the PAPPL front end needs these
+// two types, and `geometry` is compiled whether or not `golden-replay` is.
+pub use crate::geometry::{CupsColorOrder, CupsColorSpace};
 
 /// CUPS Raster spesifikasyonuna ait senkronizasyon (magic) baytları.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,75 +76,6 @@ impl CupsRasterVersion {
     #[inline]
     pub fn is_compressed(&self) -> bool {
         matches!(self, CupsRasterVersion::V2Be | CupsRasterVersion::V2Le)
-    }
-}
-
-/// CUPS Renk Uzayı (`cups_cspace_e`) — ham sayısal kod.
-///
-/// Spesifikasyon 40'tan fazla renk uzayı tanımlar, ama bu sürücü yalnızca
-/// `K` ile çalışır: diğer her değer `validate_page_header` tarafından
-/// reddedilir. Bu yüzden uzayların tamamını ayrı ayrı modellemek yerine ham
-/// kod saklanıyor. Karar veren iki nokta da (K kontrolü ve v2 çözücüsünün
-/// boş renk dolgusu) zaten sayısal kodla çalışır; adlar yalnızca hata
-/// mesajlarında görünür.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct CupsColorSpace(pub u32);
-
-impl CupsColorSpace {
-    /// Siyah-tonlama (0 = siyah). Samsung lazer motorunun beklediği tek uzay.
-    pub const K: CupsColorSpace = CupsColorSpace(3);
-
-    /// `n == 128` (satır sonuna kadar boşalt) kaydında kullanılacak dolgu.
-    ///
-    /// libcups, toner/mürekkep EKLEYEN uzaylarda — K (3), CMY (4), CMYK (5),
-    /// White (12), Gold (13), Silver (14) — boşluğu `0x00`, diğerlerinde
-    /// `0xFF` ile doldurur.
-    fn blank_fill(self) -> u8 {
-        match self.0 {
-            3 | 4 | 5 | 12 | 13 | 14 => 0x00,
-            _ => 0xFF,
-        }
-    }
-}
-
-impl fmt::Display for CupsColorSpace {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = match self.0 {
-            0 => "W (White=0 Grayscale)",
-            1 => "RGB",
-            2 => "RGBA",
-            3 => "K (Black=0 Grayscale)",
-            4 => "CMY",
-            5 => "CMYK",
-            18 => "sGray (sRGB Grayscale)",
-            19 => "sRGB",
-            20 => "AdobeRGB",
-            other => return write!(f, "Bilinmeyen({})", other),
-        };
-        write!(f, "{}", name)
-    }
-}
-
-/// CUPS Renk Dizilimi (`cups_order_e`)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CupsColorOrder {
-    /// Piksel baytları ardışık dizilir (Örn: RGBRGB... veya KKKK...)
-    Chunked,
-    /// Renk düzlemleri her satırda ayrı şeritler halindedir (RR... GG... BB...)
-    Banded,
-    /// Her renk düzlemi tüm sayfa boyunca ayrı bir sayfadır
-    Planar,
-    Unknown(u32),
-}
-
-impl From<u32> for CupsColorOrder {
-    fn from(val: u32) -> Self {
-        match val {
-            0 => CupsColorOrder::Chunked,
-            1 => CupsColorOrder::Banded,
-            2 => CupsColorOrder::Planar,
-            other => CupsColorOrder::Unknown(other),
-        }
     }
 }
 

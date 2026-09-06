@@ -2,73 +2,12 @@
 
 #![forbid(unsafe_code)]
 
-use pappl::application::{Application, Capabilities, Media};
+use pappl::application::{Application, Capabilities, GeometryProbe, RasterDriver};
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 
-// Shared with the transitional filter until spl2-core is extracted.
-#[path = "../../../src/media.rs"]
-mod media;
-
-// PWG names and physical sizes (0.01 mm); PPD point dimensions are rounded.
-// The PPD-to-PWG mapping is intentionally explicit, especially Folio/F4.
-const MEDIA: &[Media] = &[
-    Media {
-        name: c"iso_a4_210x297mm",
-        width: 21000,
-        length: 29700,
-    },
-    Media {
-        name: c"na_letter_8.5x11in",
-        width: 21590,
-        length: 27940,
-    },
-    Media {
-        name: c"na_legal_8.5x14in",
-        width: 21590,
-        length: 35560,
-    },
-    Media {
-        name: c"na_executive_7.25x10.5in",
-        width: 18415,
-        length: 26670,
-    },
-    Media {
-        name: c"iso_a5_148x210mm",
-        width: 14800,
-        length: 21000,
-    },
-    Media {
-        name: c"iso_a6_105x148mm",
-        width: 10500,
-        length: 14800,
-    },
-    Media {
-        name: c"jis_b5_182x257mm",
-        width: 18200,
-        length: 25700,
-    },
-    Media {
-        name: c"na_number-10_4.125x9.5in",
-        width: 10477,
-        length: 24130,
-    },
-    Media {
-        name: c"iso_dl_110x220mm",
-        width: 11000,
-        length: 22000,
-    },
-    Media {
-        name: c"iso_c5_162x229mm",
-        width: 16200,
-        length: 22900,
-    },
-    Media {
-        name: c"om_folio_210x330mm",
-        width: 21000,
-        length: 33000,
-    },
-];
+mod driver;
+mod media_table;
 
 fn run() -> Result<i32, Box<dyn std::error::Error>> {
     let mut args = Vec::new();
@@ -108,46 +47,39 @@ fn run() -> Result<i32, Box<dyn std::error::Error>> {
             _ => args.push(CString::new(arg.as_bytes())?),
         }
     }
-    if probe
+    if probe_output.is_some()
         && !args
             .iter()
             .skip(1)
             .any(|a| matches!(a.to_bytes(), b"server" | b"drivers" | b"--help"))
     {
-        return Err("start the probe explicitly with: --probe --probe-output /absolute/output.jsonl server; submit using a second process and -u".into());
+        return Err("start the file destination explicitly with: [--probe] --probe-output /absolute/output server; submit using a second process and -u".into());
     }
     if args.iter().any(|a| a.to_bytes() == b"--help") {
         println!("Development options: --probe --probe-output ABSOLUTE-PATH --listen-port PORT --spool-directory DIRECTORY");
-        println!("P5 writes geometry diagnostics only; real SPL2 printing is not connected yet.");
+        println!("Without --probe the driver emits SPL2/QPDL to the device. The margins it");
+        println!("uses have not been measured on hardware yet; see release gate G-1.");
     }
+
+    // --probe keeps the P5 instrument: JSON Lines to a file, never a printer.
+    let driver: Box<dyn RasterDriver> = if probe {
+        Box::new(GeometryProbe)
+    } else {
+        Box::new(driver::Spl2Driver::new())
+    };
     std::fs::create_dir_all(&spool)?;
     let app = Application {
         capabilities: Capabilities {
             name: c"samsung_ml216x",
             description: c"Samsung ML-216x (P5 development)",
-            media: MEDIA,
+            media: media_table::MEDIA,
             resolutions: &[(300, 300), (600, 600), (1200, 600), (1200, 1200)],
-            sources: &[c"auto", c"manual"],
-            // IPP keywords mapped to the existing PPD/PJL vocabulary in P6.
-            types: &[
-                c"auto",
-                c"stationery",
-                c"stationery-heavyweight",
-                c"stationery-lightweight",
-                c"stationery-bond",
-                c"transparency",
-                c"cardstock",
-                c"labels",
-                c"stationery-preprinted",
-                c"stationery-colored",
-                c"envelope",
-                c"stationery-cotton",
-                c"stationery-recycled",
-                c"other",
-            ],
+            sources: media_table::SOURCE_NAMES,
+            types: media_table::TYPE_NAMES,
             // 12.5 pt = 440.9722... hundredths mm, nearest IPP unit is 441.
-            margin: (media::HARD_MARGIN_PT * 2540.0 / 72.0).round() as i32,
+            margin: (spl2_core::media::HARD_MARGIN_PT * 2540.0 / 72.0).round() as i32,
         },
+        driver,
         probe,
         probe_output,
         port,

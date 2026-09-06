@@ -28,24 +28,70 @@ def run(args):
     return result.stdout
 
 
+# QPDL paper codes, read off `SplPaperSize` in crates/spl2-core/src/qpdl.rs.
+PAPER_CODES = {"iso_a4_210x297mm": 2, "na_letter_8.5x11in": 0, "na_legal_8.5x14in": 1,
+               "na_executive_7.25x10.5in": 3, "iso_a5_148x210mm": 16, "iso_a6_105x148mm": 17,
+               "jis_b5_182x257mm": 11, "na_number-10_4.125x9.5in": 6, "iso_dl_110x220mm": 9,
+               "iso_c5_162x229mm": 8, "om_folio_210x330mm": 24}
+UEL = b"\x1b%-12345X"
+
+
+def check_spl(stream, medium, xdpi, ydpi, generated):
+    """Structural check of one SPL2/QPDL job: envelope plus the page header."""
+    assert stream.startswith(UEL), stream[:32]
+    assert b"@PJL ENTER LANGUAGE = QPDL" in stream, stream[:400]
+    assert stream.endswith(b"\t" + UEL), stream[-32:]
+    body = stream.index(b"@PJL ENTER LANGUAGE = QPDL")
+    start = stream.index(b"\n", body) + 1
+    header = stream[start:start + 17]
+    assert len(header) == 17 and header[0] == 0, header
+    page = {"y_dpi": header[1] * 100, "copies": int.from_bytes(header[2:4], "big"),
+            "paper": header[4], "width": int.from_bytes(header[5:7], "big"),
+            "height": int.from_bytes(header[7:9], "big"), "source": header[9],
+            "duplex": header[11], "tumble": header[12], "version": header[14],
+            "planes": header[15], "x_dpi": header[16] * 100}
+    assert page["x_dpi"] == xdpi and page["y_dpi"] == ydpi, page
+    assert page["paper"] == PAPER_CODES[medium], (page, medium)
+    assert page["copies"] == 1 and page["version"] == 3 and page["planes"] == 1, page
+    assert page["duplex"] == 1 and page["tumble"] == 0, page
+    # The band buffer spans the sheet, so the QPDL width is the sheet width
+    # rounded up to a byte, and the height is the printable area: the full
+    # media height less both 12.5 pt hard margins.
+    margin_lines = round(12.5 * ydpi / 72)
+    assert page["height"] == generated["height"] - 2 * margin_lines, (page, generated, margin_lines)
+    # The band spans the PPD's sheet width in whole points and is byte aligned,
+    # while PWG states the sheet in exact millimetres, so the two differ by up
+    # to one byte column in either direction: A4 at 1200 dpi gives 9920 against
+    # PWG's 9921, A5 at 600 dpi gives 3504 against 3496. Either way the
+    # difference falls inside the 12.5 pt hard margin, and where the band is
+    # the narrower one the engine warns that the right edge is clipped.
+    assert page["width"] % 8 == 0, page
+    assert abs(page["width"] - generated["width"]) <= 8, (page, generated)
+    return page
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--port", type=int, default=18631)
     parser.add_argument("--device-failure", action="store_true", help="use /dev/full and require job-state=aborted")
+    parser.add_argument("--spl", action="store_true", help="run the SPL2 driver instead of the geometry probe and check the QPDL page headers")
     args = parser.parse_args()
     uri = f"ipp://127.0.0.1:{args.port}/ipp/print/probe"
     results = []
     with tempfile.TemporaryDirectory(prefix="ml216x-p5-") as temp:
         tmp = Path(temp)
         generator = tmp / "input"
-        sink = Path("/dev/full") if args.device_failure else tmp / "output.jsonl"
+        sink = Path("/dev/full") if args.device_failure else tmp / ("output.spl" if args.spl else "output.jsonl")
         run(["cc", "-Wall", "-Wextra", "-Werror", ROOT / "scripts/pwg-probe-input.c", "-lcups", "-o", generator])
         # PAPPL mainloop reads XDG_CONFIG_HOME for its state file. Keep the
         # environment override scoped to this subprocess, never the user's shell.
         environment = dict(os.environ, XDG_CONFIG_HOME=str(tmp), TMPDIR=str(tmp))
         with (tmp / "server.log").open("w+") as log:
-            server = subprocess.Popen([str(ROOT / "target/debug/ml216x-printer-app"), "--probe",
+            command = [str(ROOT / "target/debug/ml216x-printer-app")]
+            if not args.spl:
+                command.append("--probe")
+            server = subprocess.Popen(command + [
                 "--probe-output", str(sink), "--listen-port", str(args.port),
                 "--spool-directory", str(tmp / "spool"), "server"], stdout=log, stderr=log, env=environment)
             try:
@@ -88,6 +134,14 @@ EXPECT job-state WITH-VALUE {8 if args.device_failure else 9}
                         if args.device_failure:
                             results.append({"device":"/dev/full", "job_state":"aborted"})
                             print("PASS device failure: job-state=aborted", flush=True)
+                            continue
+                        if args.spl:
+                            with sink.open("rb") as f:
+                                f.seek(offset)
+                                stream = f.read()
+                            page = check_spl(stream, medium, xdpi, ydpi, generated)
+                            results.append({"medium": medium, "input": generated, "qpdl_page_header": page})
+                            print(f"PASS {medium} {xdpi}x{ydpi}: QPDL {page['width']}x{page['height']}, paper {page['paper']}", flush=True)
                             continue
                         with sink.open() as f:
                             f.seek(offset)

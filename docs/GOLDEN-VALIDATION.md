@@ -227,3 +227,27 @@ not rerun for this margin change.
 | letter-1200x600-marks | 43021 | 43021 | 314 |
 | letter-300-marks | 15095 | 15095 | 315 |
 | letter-600-marks | 27121 | 27119 | 314 |
+
+## 2026-09-06 — P6: the corpus survives the crate split unchanged
+
+The SPL2 engine moved out of the filter binary into `crates/spl2-core`, and the
+filter now drives it through the same `engine::PageSetup` / `engine::BandEncoder`
+seam the printer application uses. **All 32 streams are byte identical and
+`SHA256SUMS` is unchanged**, which is what the corpus was captured for: a
+refactor of this size is exactly the case where "no change in behaviour" cannot
+be taken on trust.
+
+The band loop changed shape in the move — it takes pushed scanlines instead of
+pulling them from a `CupsRasterReader`, because PAPPL pushes — so R-1 was
+re-injected against the extracted code (`hard_margin_bytes` returning one byte
+too many, now in `crates/spl2-core/src/geometry.rs`). `golden::test_goldens_match`
+still fails on it, so the harness still covers the code after it moved. R-2 to
+R-5 were not re-run; they were not re-run for the 12.5 pt refresh either.
+
+The printer application's own geometry is covered separately, and not by this
+corpus: it produces different page heights by design, because PAPPL delivers
+full media. Its checks are
+`full_media_and_printable_area_place_the_sheet_identically` and
+`cropped_height_matches_the_printable_area` in
+`crates/ml216x-printer-app/src/driver.rs`, plus the 17-case
+`scripts/p5-probe.py --spl` run against a real IPP server.

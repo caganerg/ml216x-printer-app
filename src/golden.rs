@@ -42,12 +42,13 @@ use std::fs;
 use std::io::Cursor;
 use std::path::PathBuf;
 
-use crate::raster::{CupsRasterVersion, PageHeader};
-use crate::spl::{current_service_date, SplPaperSize, SplPaperSource};
-use crate::{
-    band_height_for, band_placement, compute_page_width_pixels, hard_margin_bytes,
-    process_with_margin, sanitize_copies, CupsFilterArgs,
+use spl2_core::geometry::{
+    band_height_for, band_placement, compute_page_width_pixels, hard_margin_bytes, sanitize_copies,
 };
+use spl2_core::qpdl::{current_service_date, SplPaperSize, SplPaperSource};
+use spl2_core::raster::{CupsRasterVersion, PageHeader};
+
+use crate::{process_with_margin, CupsFilterArgs};
 
 /// The FIXED service date written into the goldens.
 ///
@@ -539,7 +540,7 @@ fn build_sidecar(case: &Case) -> String {
         hard_margin,
     )
     .expect("a golden case must produce a valid placement");
-    let band_height = band_height_for(&header);
+    let band_height = band_height_for(header.hw_resolution);
     let paper_size = SplPaperSize::from_dimensions_pt_exact(
         header.page_size_points[0],
         header.page_size_points[1],
@@ -1089,7 +1090,7 @@ fn test_band_count_stays_inside_the_qpdl_band_order_field() {
             let header_bytes = build_page_header(&case);
             let header = PageHeader::parse(&header_bytes, CupsRasterVersion::V3Be)
                 .expect("the generated header should parse");
-            let band_height = band_height_for(&header) as u32;
+            let band_height = band_height_for(header.hw_resolution) as u32;
             let bands = header.height.div_ceil(band_height);
 
             assert!(

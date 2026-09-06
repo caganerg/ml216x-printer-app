@@ -1,14 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-//! Minimal mainloop and a file-only raster geometry probe. This deliberately
-//! emits diagnostic JSON Lines, not a printer language. Actual print jobs are
-//! refused until an encoder is connected. All C entry points use `guard`.
+//! Mainloop, driver registration and the raster callback boundary.
+//!
+//! This module owns the C side only. What a page turns into is a
+//! [`RasterDriver`], supplied by the binary: the built-in [`GeometryProbe`]
+//! writes diagnostic JSON Lines, and the ML-216x application supplies an
+//! SPL2 encoder. The split is not cosmetic — decision Q-8a licenses this
+//! crate `Apache-2.0 OR MIT` while the SPL2 engine is `GPL-2.0-only`, so the
+//! protocol may not be linked in here. All C entry points use `guard`.
 
 use crate::{guard, Device, Error, Job, Result};
 use pappl_sys as sys;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::io::Write;
 use std::ptr;
+use std::sync::atomic::{AtomicPtr, Ordering};
 
 static MAINLOOP: std::sync::Mutex<()> = std::sync::Mutex::new(());
 static FAILED_JOB: u8 = 1;
@@ -33,10 +39,205 @@ pub struct Capabilities {
 
 pub struct Application {
     pub capabilities: Capabilities,
+    /// What a validated page turns into.
+    pub driver: Box<dyn RasterDriver>,
+    /// Diagnostics mode: create a file-only printer and refuse any device URI
+    /// that is not `file:///`, so a probe run cannot reach hardware.
     pub probe: bool,
     pub probe_output: Option<CString>,
     pub port: u16,
     pub spool_directory: CString,
+}
+
+/// The application currently running its mainloop.
+///
+/// `rwriteline_cb` fires once per scanline — 7015 times for A4 at 600 dpi — and
+/// the only documented route from a job back to the driver extension is
+/// `papplPrinterGetDriverData`, which copies 8728 bytes per call. Publishing
+/// the pointer here instead keeps that off the per-scanline path. `run` holds
+/// `MAINLOOP` for its whole body, so at most one application is ever published
+/// and it outlives every callback that can observe it.
+static ACTIVE: AtomicPtr<Application> = AtomicPtr::new(ptr::null_mut());
+
+/// The application a callback belongs to.
+fn active<'a>() -> Result<&'a Application> {
+    let raw = ACTIVE.load(Ordering::Acquire);
+    // SAFETY: `run` publishes `self` before `papplMainloop` and clears it
+    // afterwards, holding `MAINLOOP` throughout; callbacks only run in between.
+    unsafe { raw.cast_const().as_ref() }.ok_or(Error::NullPointer("application"))
+}
+
+/// One page's options, validated and copied out of the C struct.
+///
+/// The driver never sees `pappl_pr_options_t`: R-6 requires every field to be
+/// checked at this boundary, and a driver that reads the raw struct could skip
+/// that. Lengths are PWG units — hundredths of a millimetre — as PAPPL states
+/// them in `pappl/printer.h`.
+#[derive(Debug, Clone)]
+pub struct RasterOptions {
+    pub copies: i32,
+    pub resolution: [i32; 2],
+    pub media_name: String,
+    /// `[width, length]` in hundredths of a millimetre.
+    pub media_size: [i32; 2],
+    /// `[left, right, top, bottom]` in hundredths of a millimetre.
+    pub media_margins: [i32; 4],
+    pub media_source: String,
+    pub media_type: String,
+    /// `cupsWidth`; meaningful only for raster callbacks.
+    pub width: u32,
+    /// `cupsHeight`.
+    pub height: u32,
+    /// `cupsBytesPerLine`.
+    pub bytes_per_line: u32,
+    /// The raster header's own `Margins`, which PAPPL leaves at zero on the
+    /// BLACK_1 PWG path (`docs/P5-MEASUREMENTS.json`).
+    pub header_margins: [u32; 2],
+}
+
+impl RasterOptions {
+    /// Validates `raw` against the capability table and copies it out.
+    fn checked(
+        raw: &sys::pappl_pr_options_t,
+        c: &Capabilities,
+        raster: bool,
+    ) -> Result<RasterOptions> {
+        validate(raw, c, raster)?;
+        Ok(RasterOptions {
+            copies: raw.copies,
+            resolution: raw.printer_resolution,
+            media_name: text(&raw.media.size_name)?,
+            media_size: [raw.media.size_width, raw.media.size_length],
+            media_margins: [
+                raw.media.left_margin,
+                raw.media.right_margin,
+                raw.media.top_margin,
+                raw.media.bottom_margin,
+            ],
+            media_source: text(&raw.media.source)?,
+            media_type: text(&raw.media.type_)?,
+            width: raw.header.cupsWidth,
+            height: raw.header.cupsHeight,
+            bytes_per_line: raw.header.cupsBytesPerLine,
+            header_margins: raw.header.Margins,
+        })
+    }
+}
+
+/// What the application does with a page.
+///
+/// One job runs at a time per printer, but PAPPL may run several printers, so
+/// implementations keep their per-job state behind their own lock. Every method
+/// returning `Err` fails the job: nothing on this path may fall back to a
+/// plausible-looking default.
+pub trait RasterDriver: Send + Sync {
+    fn start_job(
+        &self,
+        job: &Job<'_>,
+        options: &RasterOptions,
+        device: &mut Device<'_>,
+    ) -> Result<()>;
+    fn start_page(
+        &self,
+        job: &Job<'_>,
+        options: &RasterOptions,
+        device: &mut Device<'_>,
+        page: u32,
+    ) -> Result<()>;
+    fn write_line(
+        &self,
+        job: &Job<'_>,
+        options: &RasterOptions,
+        device: &mut Device<'_>,
+        y: u32,
+        line: &[u8],
+    ) -> Result<()>;
+    fn end_page(
+        &self,
+        job: &Job<'_>,
+        options: &RasterOptions,
+        device: &mut Device<'_>,
+        page: u32,
+    ) -> Result<()>;
+    fn end_job(
+        &self,
+        job: &Job<'_>,
+        options: &RasterOptions,
+        device: &mut Device<'_>,
+    ) -> Result<()>;
+
+    /// Called when a job ends without `end_job` — PAPPL abandoning it, or an
+    /// earlier callback failing. An implementation that keeps per-job state
+    /// must drop it here, or the next job inherits it.
+    fn abandon_job(&self, _job: &Job<'_>) {}
+}
+
+/// The P5 diagnostic driver: JSON Lines describing what PAPPL delivered.
+///
+/// This is the instrument that produced `docs/P5-MEASUREMENTS.json`, so its
+/// output format is evidence and must not drift.
+pub struct GeometryProbe;
+
+impl RasterDriver for GeometryProbe {
+    fn start_job(
+        &self,
+        _job: &Job<'_>,
+        _options: &RasterOptions,
+        device: &mut Device<'_>,
+    ) -> Result<()> {
+        device.write_all(b"{\"event\":\"job-start\",\"mode\":\"geometry-probe\"}\n")
+    }
+
+    fn start_page(
+        &self,
+        _job: &Job<'_>,
+        o: &RasterOptions,
+        device: &mut Device<'_>,
+        page: u32,
+    ) -> Result<()> {
+        writeln!(device, "{{\"event\":\"page-start\",\"page\":{page},\"width\":{},\"height\":{},\"bytes_per_line\":{},\"dpi\":[{},{}],\"header_margins\":[{},{}],\"media\":[{},{}],\"margin\":{},\"copies\":{}}}",
+            o.width, o.height, o.bytes_per_line, o.resolution[0], o.resolution[1],
+            o.header_margins[0], o.header_margins[1], o.media_size[0], o.media_size[1],
+            o.media_margins[0], o.copies)?;
+        Ok(())
+    }
+
+    fn write_line(
+        &self,
+        _job: &Job<'_>,
+        _options: &RasterOptions,
+        device: &mut Device<'_>,
+        y: u32,
+        line: &[u8],
+    ) -> Result<()> {
+        let first = line.iter().position(|v| *v != 0).map_or(-1, |v| v as i32);
+        let last = line.iter().rposition(|v| *v != 0).map_or(-1, |v| v as i32);
+        let ones: u32 = line.iter().map(|v| v.count_ones()).sum();
+        writeln!(device, "{{\"event\":\"line\",\"y\":{y},\"first_nonzero_byte\":{first},\"last_nonzero_byte\":{last},\"ones\":{ones}}}")?;
+        Ok(())
+    }
+
+    fn end_page(
+        &self,
+        _job: &Job<'_>,
+        _options: &RasterOptions,
+        device: &mut Device<'_>,
+        page: u32,
+    ) -> Result<()> {
+        writeln!(device, "{{\"event\":\"page-end\",\"page\":{page}}}")?;
+        Ok(())
+    }
+
+    fn end_job(
+        &self,
+        _job: &Job<'_>,
+        _options: &RasterOptions,
+        device: &mut Device<'_>,
+    ) -> Result<()> {
+        device.write_all(b"{\"event\":\"job-end\"}\n")?;
+        device.flush();
+        Ok(())
+    }
 }
 
 // papplSystemSetPrinterDrivers stores the pointer, it does NOT copy the array
@@ -118,6 +319,10 @@ impl Application {
             application: self,
             driver: &mut driver,
         };
+        // Published for the raster callbacks; see `ACTIVE`. Cleared below so a
+        // second `run` in the same process cannot observe a dead frame.
+        ACTIVE.store((self as *const Application).cast_mut(), Ordering::Release);
+        let _published = PublishedApplication;
         // SAFETY: all storage and self remain alive until the mainloop and its
         // job threads return. PAPPL owns/deletes the system returned below.
         Ok(unsafe {
@@ -137,6 +342,15 @@ impl Application {
                 (&mut context as *mut RunContext<'_>).cast(),
             )
         })
+    }
+}
+
+/// Clears [`ACTIVE`] however `run` returns, including on a panic.
+struct PublishedApplication;
+
+impl Drop for PublishedApplication {
+    fn drop(&mut self) {
+        ACTIVE.store(ptr::null_mut(), Ordering::Release);
     }
 }
 
@@ -172,10 +386,10 @@ unsafe extern "C" fn system_cb(
             if !sys::papplSystemAddListeners(raw, c"127.0.0.1".as_ptr()) {
                 return Err(error("could not bind the loopback listener"));
             }
+            // A file destination is how both drivers are exercised without
+            // hardware: the probe writes JSON Lines to it, and the SPL2 driver
+            // writes a stream that can be diffed against the golden corpus.
             if let Some(output) = &app.probe_output {
-                if !app.probe {
-                    return Err(error("--probe-output requires --probe"));
-                }
                 let c = &app.capabilities;
                 sys::papplSystemSetPrinterDrivers(
                     raw,
@@ -317,27 +531,6 @@ unsafe extern "C" fn driver_cb(
     }
 }
 
-// The returned borrow never leaves a callback; the Application outlives mainloop.
-unsafe fn application<'a>(job: *mut sys::pappl_job_t) -> Result<&'a Application> {
-    if job.is_null() {
-        return Err(Error::NullPointer("job"));
-    }
-    unsafe {
-        let printer = sys::papplJobGetPrinter(job);
-        if printer.is_null() {
-            return Err(Error::NullPointer("printer"));
-        }
-        let mut data: sys::pappl_pr_driver_data_t = std::mem::zeroed();
-        if sys::papplPrinterGetDriverData(printer, &mut data).is_null() {
-            return Err(Error::NullPointer("driver data"));
-        }
-        data.extension
-            .cast::<Application>()
-            .as_ref()
-            .ok_or(Error::NullPointer("application"))
-    }
-}
-
 /// R-6/H: reject invalid option fields; never clamp them into plausible values.
 fn validate(options: &sys::pappl_pr_options_t, c: &Capabilities, raster: bool) -> Result<()> {
     macro_rules! require {
@@ -442,14 +635,12 @@ unsafe extern "C" fn start_job(
 ) -> bool {
     unsafe {
         job_guard(job, || {
-            let app = application(job)?;
-            if !app.probe {
-                return Err(error("SPL2 callbacks are not connected yet; use --probe with a file URI for P5 diagnostics"));
-            }
-            let o = options.as_ref().ok_or(Error::NullPointer("options"))?;
-            validate(o, &app.capabilities, false)?;
-            Device::from_raw(device)?
-                .write_all(b"{\"event\":\"job-start\",\"mode\":\"geometry-probe\"}\n")?;
+            let app = active()?;
+            let raw = options.as_ref().ok_or(Error::NullPointer("options"))?;
+            let o = RasterOptions::checked(raw, &app.capabilities, false)?;
+            let job = Job::from_raw(job)?;
+            app.driver
+                .start_job(&job, &o, &mut Device::from_raw(device)?)?;
             Ok(true)
         })
     }
@@ -463,13 +654,12 @@ unsafe extern "C" fn start_page(
 ) -> bool {
     unsafe {
         job_guard(job, || {
-            let app = application(job)?;
-            let o = options.as_ref().ok_or(Error::NullPointer("options"))?;
-            validate(o, &app.capabilities, true)?;
-            let h = &o.header;
-            let mut device = Device::from_raw(device)?;
-            writeln!(device, "{{\"event\":\"page-start\",\"page\":{page},\"width\":{},\"height\":{},\"bytes_per_line\":{},\"dpi\":[{},{}],\"header_margins\":[{},{}],\"media\":[{},{}],\"margin\":{},\"copies\":{}}}",
-            h.cupsWidth,h.cupsHeight,h.cupsBytesPerLine,h.HWResolution[0],h.HWResolution[1],h.Margins[0],h.Margins[1],o.media.size_width,o.media.size_length,o.media.left_margin,o.copies)?;
+            let app = active()?;
+            let raw = options.as_ref().ok_or(Error::NullPointer("options"))?;
+            let o = RasterOptions::checked(raw, &app.capabilities, true)?;
+            let job_handle = Job::from_raw(job)?;
+            app.driver
+                .start_page(&job_handle, &o, &mut Device::from_raw(device)?, page)?;
             Ok(true)
         })
     }
@@ -484,33 +674,36 @@ unsafe extern "C" fn write_line(
 ) -> bool {
     unsafe {
         job_guard(job, || {
-            let _job = Job::from_raw(job)?;
+            let job_handle = Job::from_raw(job)?;
             if !sys::papplJobGetData(job).is_null() {
                 return Ok(false);
             }
-            if Job::from_raw(job)?.is_cancelled() {
+            if job_handle.is_cancelled() {
                 return Err(Error::Cancelled);
             }
-            let o = options.as_ref().ok_or(Error::NullPointer("options"))?;
+            let app = active()?;
+            let raw = options.as_ref().ok_or(Error::NullPointer("options"))?;
             if line.is_null() {
                 return Err(Error::NullPointer("raster line"));
             }
             // start_page validated the header. Recheck bounds before making a slice.
-            if y >= o.header.cupsHeight
-                || o.header.cupsBytesPerLine > 4096
-                || o.header.cupsBytesPerLine == 0
+            if y >= raw.header.cupsHeight
+                || raw.header.cupsBytesPerLine > 4096
+                || raw.header.cupsBytesPerLine == 0
             {
                 return Err(error(format!(
                     "invalid line bounds: y={y}, bytes={}",
-                    o.header.cupsBytesPerLine
+                    raw.header.cupsBytesPerLine
                 )));
             }
-            let bytes = std::slice::from_raw_parts(line, o.header.cupsBytesPerLine as usize);
-            let first = bytes.iter().position(|v| *v != 0).map_or(-1, |v| v as i32);
-            let last = bytes.iter().rposition(|v| *v != 0).map_or(-1, |v| v as i32);
-            let ones: u32 = bytes.iter().map(|v| v.count_ones()).sum();
-            let mut device = Device::from_raw(device)?;
-            writeln!(device,"{{\"event\":\"line\",\"y\":{y},\"first_nonzero_byte\":{first},\"last_nonzero_byte\":{last},\"ones\":{ones}}}")?;
+            let bytes = std::slice::from_raw_parts(line, raw.header.cupsBytesPerLine as usize);
+            // Checked again per scanline rather than cached: R-6 is that no
+            // unvalidated field reaches a driver, and PAPPL owns this struct
+            // for the whole page. The cost is a handful of string compares
+            // against the encoder's own work on the same line.
+            let o = RasterOptions::checked(raw, &app.capabilities, true)?;
+            app.driver
+                .write_line(&job_handle, &o, &mut Device::from_raw(device)?, y, bytes)?;
             Ok(true)
         })
     }
@@ -518,18 +711,21 @@ unsafe extern "C" fn write_line(
 
 unsafe extern "C" fn end_page(
     job: *mut sys::pappl_job_t,
-    _options: *mut sys::pappl_pr_options_t,
+    options: *mut sys::pappl_pr_options_t,
     device: *mut sys::pappl_device_t,
     page: u32,
 ) -> bool {
     unsafe {
         job_guard(job, || {
-            let _job = Job::from_raw(job)?;
+            let job_handle = Job::from_raw(job)?;
             if !sys::papplJobGetData(job).is_null() {
                 return Err(error("an earlier raster callback failed"));
             }
-            let mut device = Device::from_raw(device)?;
-            writeln!(device, "{{\"event\":\"page-end\",\"page\":{page}}}")?;
+            let app = active()?;
+            let raw = options.as_ref().ok_or(Error::NullPointer("options"))?;
+            let o = RasterOptions::checked(raw, &app.capabilities, true)?;
+            app.driver
+                .end_page(&job_handle, &o, &mut Device::from_raw(device)?, page)?;
             // PAPPL 1.3.1 increments impressions itself in its PWG reader.
             Ok(true)
         })
@@ -537,18 +733,20 @@ unsafe extern "C" fn end_page(
 }
 unsafe extern "C" fn end_job(
     job: *mut sys::pappl_job_t,
-    _options: *mut sys::pappl_pr_options_t,
+    options: *mut sys::pappl_pr_options_t,
     device: *mut sys::pappl_device_t,
 ) -> bool {
     unsafe {
         job_guard(job, || {
-            let _job = Job::from_raw(job)?;
+            let job_handle = Job::from_raw(job)?;
             if !sys::papplJobGetData(job).is_null() {
                 return Err(error("an earlier raster callback failed"));
             }
-            let mut device = Device::from_raw(device)?;
-            device.write_all(b"{\"event\":\"job-end\"}\n")?;
-            device.flush();
+            let app = active()?;
+            let raw = options.as_ref().ok_or(Error::NullPointer("options"))?;
+            let o = RasterOptions::checked(raw, &app.capabilities, false)?;
+            app.driver
+                .end_job(&job_handle, &o, &mut Device::from_raw(device)?)?;
             Ok(true)
         })
     }
@@ -586,6 +784,11 @@ where
                 sys::PAPPL_JREASON_ERRORS_DETECTED,
                 sys::PAPPL_JREASON_NONE,
             );
+        }
+        // The job is over; a driver holding state for it will never see
+        // `end_job`, and state left behind would follow the next job.
+        if let (Ok(app), Ok(handle)) = (active(), unsafe { Job::from_raw(job) }) {
+            app.driver.abandon_job(&handle);
         }
     }
     success
@@ -691,6 +894,7 @@ mod tests {
     fn geometry_probe_cannot_register_a_hardware_destination() {
         let app = Application {
             capabilities: capabilities(),
+            driver: Box::new(GeometryProbe),
             probe: true,
             probe_output: None,
             port: 8631,

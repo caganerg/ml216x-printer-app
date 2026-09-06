@@ -557,7 +557,11 @@ impl Algo0x11 {
 
     /// `compress`'in ürettiği akışı geri çözer (test/teşhis amaçlı).
     /// Format spec'inin (bkz. gerçek SpliX algo0x11.cpp) ters uygulamasıdır.
-    #[cfg(test)]
+    ///
+    /// Exposed under `golden-replay` as well as `test` for the reason Q-6
+    /// gives: a `#[cfg(test)]` item is invisible to another crate's tests, and
+    /// the filter's band-placement tests decompress the bands they assert on.
+    #[cfg(any(test, feature = "golden-replay"))]
     pub fn decompress(data: &[u8]) -> Vec<u8> {
         let uncomp_size = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
         let mut ptr_array = [0u16; TABLE_PTR_SIZE];
@@ -817,6 +821,15 @@ impl<W: Write> SplStreamWriter<W> {
     }
 
     /// Samsung ML-2160 serisi PJL Başlığını gönderir.
+    /// Borrows the sink this writer wraps.
+    ///
+    /// The CUPS filter writes straight to stdout, but PAPPL hands its driver a
+    /// fresh device handle on every callback, so the printer application wraps
+    /// a `Vec<u8>` and drains it here after each call. Nothing else needs it.
+    pub fn writer_mut(&mut self) -> &mut W {
+        &mut self.writer
+    }
+
     pub fn begin_job(&mut self, config: &JobConfig) -> io::Result<()> {
         // Gerçek SpliX (printer.cpp sendPJLHeader) sırası: UEL'den sonra doğrudan
         // "@PJL DEFAULT SERVICEDATE=..." ile başlar; ayrı bir çıplak "@PJL\n" satırı
