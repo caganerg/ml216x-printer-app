@@ -20,6 +20,44 @@ outside the Q-1..Q-11 range.
 
 ---
 
+## 2026-09-06 — P9 (DECIDED): raster type stays BLACK_1; the dithering path is reachable, not avoidable
+
+The P9 raster-type decision, and the answer to the dithering-exposure question
+the Q-1 follow-up deferred here. The full review with reproductions is
+`docs/SECURITY-REVIEW.md`; this is the decision it produces.
+
+**Raster type: `BLACK_1`, forced, unchanged.** The ML-216x QPDL engine speaks
+1-bit monochrome and nothing else, so `raster_types` and `force_raster_type`
+are `PAPPL_PWG_RASTER_TYPE_BLACK_1`. That was never really open — it is what the
+hardware and the existing engine need — but P9 is where it is confirmed against
+what PAPPL does with it.
+
+**The dithering path is reachable.** The Q-1 follow-up hoped that declaring only
+1-bit output might make PAPPL's dithering unreachable. Reading the 1.3.1 source
+and reproducing against it showed the opposite: forcing `BLACK_1` *selects* the
+dithering path, because an 8-bit `image/pwg-raster`, or an `image/jpeg` /
+`image/png` that PAPPL's own filters produce, is dithered down to 1-bit inside
+libpappl before any callback this project owns is reached. So `BLACK_1` is not a
+security lever, and it is kept for the hardware reason alone.
+
+**Two confirmed libpappl overflows ride on this, and neither is ours to fix.**
+The two unpatched upstream fixes flagged under Q-1 — `4587888f50` (dithering,
+`job-process.c`) and `44327aaac3` (ready-media, `printer-ipp.c`) — are present
+in `pappl 1.3.1-2.1` and were each reproduced to a server crash: an 8-bit
+raster wider than the page (S-1) and an oversized `media-ready` list (S-2). Both
+faults are inside libpappl, upstream of every callback this project registers,
+so there is no code change on this side that prevents them. Containment is that
+the listener is bound to `127.0.0.1`, which makes them a local denial of service
+rather than a remote one; a non-loopback bind must wait on a patched libpappl.
+`scripts/security-probe.py` reproduces both and asserts the crash, so the
+findings retire themselves when the library is fixed.
+
+**Still to do:** file the Debian bug against `src:pappl` citing the two commits
+and the confirmed 1.3.1 lines, and record its number in the review and the
+README. It needs a bug-tracker submission and is left for the maintainer.
+
+---
+
 ## 2026-09-06 — Q-14 (DECIDED): a normal-quality job runs at a resolution the document was never rendered at
 
 Raised while analysing the state of the tree before P7, by driving the built

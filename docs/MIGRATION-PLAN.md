@@ -687,9 +687,13 @@ outstanding until the crates exist.
 
 - **Completed in P5: printable-area vs full-media experiment (Q-2).** The
   tested BLACK_1/PWG path supplies full media; see `docs/MARGINS.md`.
-- **Dithering-path exposure (from the Q-1 follow-up).** Whether declaring only
-  1-bit black raster makes PAPPL's dithering overflow unreachable for us is to
-  be settled as part of the P9 raster-type decision and recorded in
-  `docs/SECURITY-REVIEW.md`.
-- **Confirming the unpatched lines in 1.3.1's source**, before filing a Debian
-  bug citing upstream commits `4587888f50` and `44327aaac3`.
+- **Settled in P9: dithering-path exposure (from the Q-1 follow-up).**
+  Declaring only 1-bit black raster does **not** make the dithering overflow
+  unreachable — forcing `BLACK_1` selects the dithering path rather than
+  avoiding it. See `docs/SECURITY-REVIEW.md` (S-1) and the P9 entry in
+  `docs/DECISIONS.md`.
+- **Confirmed in P9: the unpatched lines in 1.3.1's source.** Both
+  `4587888f50` (dithering) and `44327aaac3` (ready-media) are present in
+  `pappl 1.3.1-2.1` and were reproduced to a crash; `scripts/security-probe.py`
+  re-runs them. Filing the Debian bug that cites them is the one action left,
+  and it needs a bug-tracker submission (maintainer).

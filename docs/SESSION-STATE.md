@@ -139,26 +139,29 @@ stream, a single flipped bit, and the old resolution order.
    first. The service runs as root for now, with the reason written in the unit
    file. The maintainer scripts pass `sh -n` but have not been executed: doing
    so installs a system service on the development machine.
-3. **P9's raster-type and dithering review.** Note what the source reading
-   turned up for it: with `force_raster_type = BLACK_1`, PAPPL selects a dither
-   matrix by quality and content, and `image/jpeg` and `image/png` reach the
-   driver through PAPPL's own filters — so the dithering path is *not*
-   unreachable for us, and P9 has to characterise it rather than assume 1-bit
-   input everywhere.
+3. ~~**P9's raster-type and dithering review**~~ — **done.** `BLACK_1` stays
+   (the engine is 1-bit only), and the dithering path is reachable rather than
+   avoidable: forcing `BLACK_1` selects it. The review confirmed the two
+   unpatched libpappl overflows the Q-1 follow-up flagged and reproduced both
+   to a server crash — an 8-bit raster wider than the page, and an oversized
+   `media-ready` list. Neither is fixable in this tree; the loopback-only bind
+   keeps them a local DoS. See `docs/SECURITY-REVIEW.md`, the P9 entry in
+   `docs/DECISIONS.md`, and `scripts/security-probe.py`. The one action left is
+   filing the Debian bug, which needs a bug-tracker submission (maintainer).
 
-Two smaller items found alongside, neither blocking:
+One smaller item found alongside, not blocking:
 
 * ~~`spl2-core` still emits Turkish diagnostics~~ — **done.** Every diagnostic
   string in `spl2-core` is English, and the goldens are byte identical across
   the change. The Turkish **comments** in `src/main.rs`, `src/golden.rs`, the
   four `spl2-core` modules and `goldens/README.md` remain, and are left to a
   dedicated pass.
-* PAPPL 1.3.1's own log lines drop the last character of formatted numbers —
-  "Device write metrics: 4545 bytes" for 45453 bytes actually written,
-  "60x60dpi" for `600x600dpi` as stored in the state file, "3276 clients" for
-  32768. Our own log lines are formatted in Rust and are unaffected. Worth
-  confirming in the source before it is reported anywhere, and worth knowing
-  before anyone debugs from those numbers.
+
+An earlier note here claimed PAPPL's log lines drop the last character of
+formatted numbers ("4545" for 45453, "60x60dpi" for 600x600). That was wrong:
+the 1.3.1 format strings are correct (`%lu bytes`, `%dx%ddpi`), the QPDL width
+computed from the resolution was right, and the truncation was an artifact of
+how the output was captured, not a libpappl defect. Nothing to report.
 
 Keep the original filter in-tree until P11 passes; keep the PPD permanently.
 Hardware G-1 and open questions Q-12 and Q-13 remain outstanding; Q-14 to Q-17
