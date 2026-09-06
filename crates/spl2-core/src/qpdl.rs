@@ -1,11 +1,11 @@
-//! # Samsung Printer Language (SPL2 / QPDL v3) Protokol Modülü
+//! # Samsung Printer Language (SPL2 / QPDL v3) protocol module
 //!
-//! Samsung ML-2160 serisi ve uyumlu monokrom QPDL/SPL2 lazer yazıcılar için
-//! tam uyumlu PJL iş kontrolü, 17-baytlık sayfa başlığı, 0x09ABCDEF alt-başlıklı
-//! ve sağlama toplamlı (checksum) Algo 0x11 RLE şerit kodlaması.
+//! Fully compatible PJL job control, the 17-byte page header, and Algo 0x11 RLE
+//! band encoding (with the 0x09ABCDEF sub-header and a checksum) for the Samsung
+//! ML-2160 series and compatible monochrome QPDL/SPL2 laser printers.
 //!
-//! Kaynak: OpenPrinting SpliX (QPDL v3 / ML-2160 serisi)
-//! Lisans: GPLv2 (yalnızca v2 — SpliX kaynağıyla aynı)
+//! Source: OpenPrinting SpliX (QPDL v3 / ML-2160 series)
+//! Licence: GPLv2 (v2 only — same as the SpliX source)
 
 use std::io::{self, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -14,18 +14,18 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub const PJL_UEL: &[u8] = b"\x1b%-12345X";
 pub const PJL_END: &[u8] = b"\t\x1b%-12345X";
 
-/// Alt Başlık İmzası (Sub-header Signature: 0x09ABCDEF - Little Endian)
+/// Sub-header signature (0x09ABCDEF - little endian)
 pub const SUBHEADER_SIG_LE: [u8; 4] = [0xEF, 0xCD, 0xAB, 0x09];
 
-/// Algo 0x11 RLE Sıkıştırma Sabitleri
+/// Algo 0x11 RLE compression constants
 pub const COMPRESS_SAMPLE_RATE: usize = 0x800; // 2048 bayt
-pub const TABLE_PTR_SIZE: usize = 0x40; // 64 adet işaretçi/ofset
+pub const TABLE_PTR_SIZE: usize = 0x40; // 64 pointers/offsets
 pub const MAX_UNCOMPRESSED_BYTES: usize = 0x80; // 128 bayt
-pub const MIN_COMPRESSED_BYTES: usize = 2; // > 2 bayt (en az 3 bayt eşleşme)
+pub const MIN_COMPRESSED_BYTES: usize = 2; // > 2 bytes (at least a 3-byte match)
 pub const MAX_COMPRESSED_BYTES: usize = 0x1FF + 3; // 514 bayt
 pub const COMPRESSION_FLAG: u8 = 0x80;
 
-/// Samsung QPDL Kağıt Boyutu Tanımları
+/// Samsung QPDL paper-size definitions
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum SplPaperSize {
@@ -56,13 +56,13 @@ pub enum SplPaperSize {
 }
 
 impl SplPaperSize {
-    /// Fiziksel ölçüyü TANINAN bir QPDL kağıt koduna eşler; tablo dışındaki
-    /// her ölçü için `None` döner.
+    /// Maps a physical size to a RECOGNISED QPDL paper code; returns `None`
+    /// for any size outside the table.
     ///
-    /// Bilinmeyen bir ölçü başka bir kâğıt koduna düşürülmez: QPDL sayfa
-    /// başlığındaki kâğıt kodu ile gönderilen piksel geometrisinin ayrışması
-    /// yazıcı tarafında hizalama ve besleme hatalarına yol açabilir. Çağıran
-    /// taraf `None` sonucunu işi reddederek ele almalıdır.
+    /// An unknown size is not coerced to some other paper code: a divergence
+    /// between the paper code in the QPDL page header and the pixel geometry
+    /// actually sent can cause alignment and feed errors on the printer side.
+    /// The caller must handle a `None` result by rejecting the job.
     pub fn from_dimensions_pt_exact(width_pt: u32, height_pt: u32) -> Option<Self> {
         Some(match (width_pt, height_pt) {
             (595, 842) | (842, 595) => SplPaperSize::A4,
@@ -72,16 +72,16 @@ impl SplPaperSize {
             (297, 420) | (420, 297) => SplPaperSize::A6,
             (522, 756) | (756, 522) => SplPaperSize::Executive,
             // Folio (F4) = 210x330 mm = 595.28 x 935.43 pt -> 595 x 935.
-            // Daha önce burada 612 x 936 vardı, ki o Folio değil 8.5x13 inç,
-            // yani Adobe adlandırmasıyla FanFoldGermanLegal'dir — `cupstestppd`
-            // de PPD'yi tam bu gerekçeyle uyarıyordu ("Size "Folio" should be
-            // the Adobe standard name "FanFoldGermanLegal""). Upstream
-            // SpliX'in aynı motor ailesine ait PPD'leri (ml1910.ppd,
-            // ml2010.ppd, ml2525.ppd, ml1640.ppd, ml2510.ppd) da
-            // `*PaperDimension Folio: "595 935"` diyor. DİKKAT: SpliX'te
-            // ml2160.ppd/ml2165.ppd diye bir dosya YOKTUR; bu seri upstream
-            // PPD listesinde yer almaz, bu yüzden referans olarak aynı QPDL
-            // v3 protokolünü konuşan kardeş modeller kullanılıyor.
+            // This used to be 612 x 936, which is not Folio but 8.5x13 inch,
+            // i.e. FanFoldGermanLegal in Adobe's naming — `cupstestppd` warned
+            // about the PPD for exactly this reason ("Size "Folio" should be
+            // the Adobe standard name "FanFoldGermanLegal""). Upstream SpliX's
+            // PPDs for the same engine family (ml1910.ppd, ml2010.ppd,
+            // ml2525.ppd, ml1640.ppd, ml2510.ppd) also say
+            // `*PaperDimension Folio: "595 935"`. NOTE: there is NO
+            // ml2160.ppd/ml2165.ppd file in SpliX; this series is not in the
+            // upstream PPD list, so sibling models speaking the same QPDL v3
+            // protocol are used as the reference.
             (595, 935) | (935, 595) => SplPaperSize::Folio,
             (516, 729) | (729, 516) => SplPaperSize::B5,
             (297, 684) | (684, 297) => SplPaperSize::Env10,
@@ -92,7 +92,7 @@ impl SplPaperSize {
     }
 }
 
-/// Kağıt Kaynağı (Tray)
+/// Paper source (tray)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum SplPaperSource {
@@ -105,21 +105,21 @@ pub enum SplPaperSource {
 }
 
 impl SplPaperSource {
-    /// CUPS Raster başlığındaki `MediaPosition` alanını QPDL kağıt kaynağı
-    /// koduna eşler; tanınmayan her değer için `None` döner.
+    /// Maps the `MediaPosition` field in the CUPS Raster header to a QPDL
+    /// paper-source code; returns `None` for any unrecognised value.
     ///
-    /// Eşleme birebirdir, çünkü bu projenin PPD'si `*InputSlot` seçeneklerini
-    /// doğrudan QPDL kodlarıyla numaralandırır (`<</MediaPosition 1>>` = Auto,
-    /// `<</MediaPosition 2>>` = Manual). Aynı numaralandırmayı upstream
-    /// SpliX'in ml1910.ppd / ml2010.ppd / ml2525.ppd / ml1640.ppd /
-    /// ml2510.ppd dosyaları da kullanır. Bağı bir yorum olarak bırakmamak
-    /// için `test_every_ppd_input_slot_maps_to_its_qpdl_code` PPD'yi
-    /// ayrıştırıp her seçeneğin beklenen koda düştüğünü doğrular.
+    /// The mapping is one-to-one, because this project's PPD numbers the
+    /// `*InputSlot` options directly with the QPDL codes (`<</MediaPosition 1>>`
+    /// = Auto, `<</MediaPosition 2>>` = Manual). Upstream SpliX's ml1910.ppd /
+    /// ml2010.ppd / ml2525.ppd / ml1640.ppd / ml2510.ppd use the same
+    /// numbering. So as not to leave the link as a mere comment,
+    /// `test_every_ppd_input_slot_maps_to_its_qpdl_code` parses the PPD and
+    /// verifies that every option maps to the expected code.
     ///
-    /// `0`, "hiçbir kaynak seçilmedi" demektir (PPD'siz üretilmiş bir raster,
-    /// ör. `cupsfilter -p` olmadan) ve sessizce `Auto`'ya düşer — bu bir
-    /// sapma değil, alanın yokluğudur. Tanınmayan DİĞER değerler `None`
-    /// döner ki çağıran taraf uyarabilsin.
+    /// `0` means "no source selected" (a raster produced without a PPD, e.g.
+    /// without `cupsfilter -p`) and falls back silently to `Auto` — this is not
+    /// a deviation but the absence of the field. OTHER unrecognised values
+    /// return `None` so the caller can warn.
     pub fn from_media_position(media_position: u32) -> Option<Self> {
         Some(match media_position {
             0 | 1 => SplPaperSource::Auto,
@@ -132,7 +132,7 @@ impl SplPaperSource {
     }
 }
 
-/// Çözünürlük
+/// Resolution
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SplResolution {
     Dpi300,
@@ -151,10 +151,10 @@ impl SplResolution {
         }
     }
 
-    /// Bir DPI değerini yalnızca QPDL'nin bu sürücüde desteklediği kesin
-    /// değerlerden biriyse dönüştürür. Yakındaki değere yuvarlama yapılmaz;
-    /// aksi hâlde raster geometrisi örneğin 599 DPI ile hesaplanırken QPDL
-    /// başlığı 300 DPI diyebilir.
+    /// Converts a DPI value only if it is one of the exact values QPDL
+    /// supports in this driver. There is no rounding to a nearby value;
+    /// otherwise the raster geometry could be computed with, say, 599 DPI while
+    /// the QPDL header says 300 DPI.
     pub fn from_dpi_exact(dpi: u32) -> Option<Self> {
         match dpi {
             300 => Some(SplResolution::Dpi300),
@@ -164,10 +164,10 @@ impl SplResolution {
         }
     }
 
-    /// PPD'nin ve ML-2160 ailesi için doğrulanmış QPDL modlarının sunduğu
-    /// çözünürlük çiftlerini denetler. Eksenleri ayrı ayrı doğrulamak yeterli
-    /// değildir: örneğin 600x1200 iki tanınan eksenden oluşsa da sunulan bir
-    /// yazıcı modu değildir.
+    /// Checks the resolution pairs offered by the PPD and by the QPDL modes
+    /// validated for the ML-2160 family. Validating the axes separately is not
+    /// enough: e.g. 600x1200 is made of two recognised axes but is not an
+    /// offered printer mode.
     pub fn pair_is_supported(x_dpi: u32, y_dpi: u32) -> bool {
         matches!(
             (x_dpi, y_dpi),
@@ -176,11 +176,10 @@ impl SplResolution {
     }
 }
 
-/// Duplex Modu
+/// Duplex mode
 ///
-/// SpliX `request.cpp` PPD'deki `Duplex` seçeneğini, PPD'nin
-/// `*QPDL ManualDuplex` özniteliğine bakarak OTOMATİK ya da ELLE duplex'e
-/// eşler:
+/// SpliX `request.cpp` maps the PPD's `Duplex` option to AUTOMATIC or MANUAL
+/// duplex by looking at the PPD's `*QPDL ManualDuplex` attribute:
 ///
 /// ```c
 /// manualDuplex = ppd->get("ManualDuplex", "QPDL").isTrue();
@@ -189,13 +188,13 @@ impl SplResolution {
 /// else _duplex = Simplex;
 /// ```
 ///
-/// ML-2160 serisinin otomatik duplex donanımı YOKTUR: hem upstream SpliX'in
-/// kardeş model PPD'leri (`ml1910.ppd`, `ml2010.ppd`, `ml2525.ppd`,
-/// `ml1640.ppd`, `ml2510.ppd`) hem de bu projenin PPD'si
-/// `*QPDL ManualDuplex: "On"` diyor. Dolayısıyla bu yazıcı ailesinde gerçekte
-/// yalnızca `Simplex` ve `Manual*` varyantları tetiklenir; `LongEdge` ve
-/// `ShortEdge` aynı QPDL v3 protokolünü konuşan otomatik duplekserli modeller
-/// için modelde tutuluyor.
+/// The ML-2160 series has NO automatic-duplex hardware: both upstream SpliX's
+/// sibling-model PPDs (`ml1910.ppd`, `ml2010.ppd`, `ml2525.ppd`,
+/// `ml1640.ppd`, `ml2510.ppd`) and this project's PPD say
+/// `*QPDL ManualDuplex: "On"`. So in this printer family only the `Simplex`
+/// and `Manual*` variants are actually triggered; `LongEdge` and `ShortEdge`
+/// are kept in the model for automatic-duplex models speaking the same QPDL v3
+/// protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SplDuplex {
     #[default]
@@ -206,7 +205,7 @@ pub enum SplDuplex {
     ManualShortEdge,
 }
 
-/// Şerit Sıkıştırma Algoritması
+/// Band compression algorithm
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum SplCompression {
@@ -215,39 +214,39 @@ pub enum SplCompression {
     Rle = 0x11,
 }
 
-/// Yazıcının `@PJL SET PAPERTYPE` için tanıdığı kelime dağarcığı.
+/// The vocabulary the printer recognises for `@PJL SET PAPERTYPE`.
 ///
-/// Kaynak, upstream SpliX'in aynı motor ailesine ait PPD'lerindeki
-/// `*MediaType` seçenek anahtarlarıdır (ml1910.ppd, ml2010.ppd, ml2525.ppd,
-/// ml1640.ppd, ml2510.ppd — beşi de birebir aynı listeyi veriyor). SpliX bu
-/// anahtarı PPD'den okuyup `@PJL SET PAPERTYPE=%s` satırına olduğu gibi
-/// yazar (printer.cpp sendPJLHeader), yani anahtarın kendisi protokol
-/// değeridir; okunabilir bir etiket değildir.
+/// The source is the `*MediaType` option keys in upstream SpliX's PPDs for the
+/// same engine family (ml1910.ppd, ml2010.ppd, ml2525.ppd, ml1640.ppd,
+/// ml2510.ppd — all five give the exact same list). SpliX reads this key from
+/// the PPD and writes it verbatim into the `@PJL SET PAPERTYPE=%s` line
+/// (printer.cpp sendPJLHeader), so the key itself is the protocol value; it is
+/// not a human-readable label.
 ///
-/// `OFF` = "yazıcının kendi varsayılanını kullan" ve listenin ilk üyesidir;
-/// `PJL_PAPERTYPE_DEFAULT` buna işaret eder.
+/// `OFF` = "use the printer's own default" and is the first member of the list;
+/// `PJL_PAPERTYPE_DEFAULT` points to it.
 pub const PJL_PAPER_TYPES: [&str; 14] = [
     "OFF", "NORMAL", "THICK", "THIN", "BOND", "OHP", "CARD", "LABEL", "USED", "COLOR", "ENV",
     "COTTON", "RECYCLED", "ARCHIVE",
 ];
 
-/// Kağıt türü bilinmediğinde ya da tanınmadığında kullanılan PJL değeri.
+/// The PJL value used when the paper type is unknown or unrecognised.
 pub const PJL_PAPERTYPE_DEFAULT: &str = PJL_PAPER_TYPES[0];
 
-/// Serbest metin bir kağıt türü adını, yazıcının tanıdığı PJL değerine eşler.
+/// Maps a free-text paper-type name to a PJL value the printer recognises.
 ///
-/// Değer CUPS Raster başlığındaki `MediaType` alanından, yani işi gönderen
-/// istemciden gelir ve GÜVENİLMEZDİR; bu yüzden metin doğrudan PJL satırına
-/// yazılmaz, yalnızca tabloya eşlenir. Dönüş tipi `&'static str` olduğu için
-/// PJL satırına yalnızca yukarıdaki sabitlerden biri girebilir: keyfi bir
-/// dizenin (boşluk, CR/LF, ESC) satıra sızması tip düzeyinde imkânsızdır.
-/// `PAPERTYPE` değeri `JOBNAME`/`USERNAME` gibi tırnak içinde taşınmadığı
-/// için bu ayrım önemli — orada `sanitize_pjl_field` yeterliyken burada tek
-/// bir boşluk bile satırı bozardı.
+/// The value comes from the `MediaType` field in the CUPS Raster header, i.e.
+/// the client that submitted the job, and is UNTRUSTED; so the text is not
+/// written straight into the PJL line, only mapped through the table. Because
+/// the return type is `&'static str`, only one of the constants above can enter
+/// the PJL line: an arbitrary string (space, CR/LF, ESC) leaking into the line
+/// is impossible at the type level. This distinction matters because the
+/// `PAPERTYPE` value is not carried in quotes like `JOBNAME`/`USERNAME` — there
+/// `sanitize_pjl_field` suffices, whereas here a single space would corrupt the
+/// line.
 ///
-/// Karşılaştırma ASCII'de büyük/küçük harfe duyarsızdır: PPD anahtarları
-/// büyük harfli, ama elle düzenlenmiş bir PPD'nin `env` yazması sessiz bir
-/// geri düşüşe yol açmasın.
+/// The comparison is ASCII case-insensitive: the PPD keys are upper-case, but a
+/// hand-edited PPD writing `env` should not cause a silent fallback.
 pub fn pjl_paper_type(name: &str) -> Option<&'static str> {
     let name = name.trim();
     PJL_PAPER_TYPES
@@ -256,9 +255,9 @@ pub fn pjl_paper_type(name: &str) -> Option<&'static str> {
         .copied()
 }
 
-/// Unix çağından itibaren geçen tam gün sayısını Gregoryen takvim tarihine
-/// çevirir. Algoritma yalnızca tam sayı aritmetiği kullanır; böylece filtre,
-/// güncel servis tarihini üretmek için bir saat/tarih bağımlılığı taşımaz.
+/// Converts a whole number of days since the Unix epoch into a Gregorian
+/// calendar date. The algorithm uses integer arithmetic only, so the filter
+/// carries no clock/date dependency to produce the current service date.
 fn service_date_from_unix_days(days_since_epoch: i64) -> String {
     let z = days_since_epoch + 719_468;
     let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
@@ -275,9 +274,9 @@ fn service_date_from_unix_days(days_since_epoch: i64) -> String {
     format!("{year:04}{month:02}{day:02}")
 }
 
-/// Geçerli UTC tarihini Samsung PJL'nin `YYYYMMDD` servis tarihi biçiminde
-/// döndürür. Sistem saati Unix çağından önceyse güvenli ve geçerli bir taban
-/// tarihi kullanılır.
+/// Returns the current UTC date in Samsung PJL's `YYYYMMDD` service-date
+/// format. If the system clock is before the Unix epoch, a safe and valid base
+/// date is used.
 pub fn current_service_date() -> String {
     let days_since_epoch = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -286,18 +285,18 @@ pub fn current_service_date() -> String {
     service_date_from_unix_days(days_since_epoch)
 }
 
-/// İş Konfigürasyonu
+/// Job configuration
 #[derive(Debug, Clone)]
 pub struct JobConfig {
     pub job_name: String,
     pub user_name: String,
     pub service_date: String,
     pub duplex: SplDuplex,
-    /// `@PJL SET PAPERTYPE` değeri.
+    /// The `@PJL SET PAPERTYPE` value.
     ///
-    /// `String` değil `&'static str`: bkz. `pjl_paper_type`. Alan yalnızca
-    /// `PJL_PAPER_TYPES` tablosundaki sabitlerden birini taşıyabildiği için,
-    /// güvenilmez bir kağıt türü adının PJL satırına sızması mümkün değil.
+    /// `&'static str`, not `String`: see `pjl_paper_type`. Because the field can
+    /// only carry one of the constants in the `PJL_PAPER_TYPES` table, an
+    /// untrusted paper-type name cannot leak into the PJL line.
     pub paper_type: &'static str,
 }
 
@@ -313,46 +312,46 @@ impl Default for JobConfig {
     }
 }
 
-/// Sayfa Konfigürasyonu
+/// Page configuration
 #[derive(Debug, Clone)]
 pub struct PageConfig {
     pub paper_size: SplPaperSize,
     pub paper_source: SplPaperSource,
-    /// Yatay (X) çözünürlük — QPDL sayfa başlığında `header[0x10]`.
+    /// Horizontal (X) resolution — `header[0x10]` in the QPDL page header.
     ///
     /// SpliX qpdl.cpp renderPage:
     ///   header[0x1]  = page->yResolution() / 100;
     ///   header[0x10] = page->xResolution() / 100;
     ///
-    /// İki eksen AYRI alanlardır ve sıraları sezgiye aykırıdır (önce Y, sonra
-    /// X). Daha önce tek bir `resolution` alanı vardı ve her iki bayta da
-    /// YATAY çözünürlük yazılıyordu; simetrik modlarda (300/600/1200) bu fark
-    /// edilmiyordu, ama `1200x600dpi` gibi gerçek bir QPDL modunda yazıcıya
-    /// dikey çözünürlük 600 yerine 1200 olarak bildiriliyor ve sayfa dikeyde
-    /// 2 kat eziliyordu.
+    /// The two axes are SEPARATE fields and their order is counter-intuitive (Y
+    /// first, then X). This used to be a single `resolution` field with the
+    /// HORIZONTAL resolution written into both bytes; in symmetric modes
+    /// (300/600/1200) it went unnoticed, but in a real QPDL mode like
+    /// `1200x600dpi` the vertical resolution was reported to the printer as
+    /// 1200 instead of 600 and the page was squashed 2x vertically.
     pub resolution_x: SplResolution,
-    /// Dikey (Y) çözünürlük — QPDL sayfa başlığında `header[0x1]`.
+    /// Vertical (Y) resolution — `header[0x1]` in the QPDL page header.
     pub resolution_y: SplResolution,
     pub duplex: SplDuplex,
-    /// Bu sayfanın iş içindeki 1 TABANLI sırası.
+    /// This page's 1-BASED index within the job.
     ///
-    /// Yalnızca `tumble` baytını (`header[0xC]`) üretmek için gerekli: SpliX
-    /// bunu `page->pageNr() % 2` ile hesaplar ve `pageNr` 1'den başlar
-    /// (document.cpp `_currentPage = 1`). 1 tabanlı olması sözleşmenin
-    /// parçasıdır — 0 tabanlı bir sayaç pariteyi ters çevirir ve elle duplex
-    /// baskıda sayfaların yanlış yüze gelmesine yol açar.
+    /// Needed only to produce the `tumble` byte (`header[0xC]`): SpliX computes
+    /// it as `page->pageNr() % 2`, and `pageNr` starts at 1 (document.cpp
+    /// `_currentPage = 1`). Being 1-based is part of the contract — a 0-based
+    /// counter inverts the parity and makes pages land on the wrong side in
+    /// manual duplex printing.
     pub page_number: u32,
     pub copies: u16,
-    /// QPDL sayfa başlığındaki genişlik alanı 16-bit'tir; tip de öyle.
+    /// The width field in the QPDL page header is 16-bit; so is the type.
     ///
-    /// Bu alanlar önce `u32`'ydi ve `begin_page` onları `>> 8` / `& 0xFF` ile
-    /// sessizce kırpıyordu: 16-bit'e sığmayan bir değer, yazıcıya bildirilen
-    /// boyut ile gerçek payload'ın uyuşmamasına (DMA/RLE çözme senkron kaybı)
-    /// yol açardı. Genişlik için açık bir kontrol vardı, yükseklik için yoktu
-    /// ve yükseklik yalnızca `validate_page_header`'daki `MAX_LINES` sınırı
-    /// sayesinde DOLAYLI olarak korunuyordu. Alanları `u16` yapmak, çağıranı
-    /// dönüşümü (`try_into`) açıkça ele almaya zorlar ve kırpılmayı tip
-    /// düzeyinde imkânsız kılar.
+    /// These fields used to be `u32`, and `begin_page` truncated them silently
+    /// with `>> 8` / `& 0xFF`: a value not fitting 16 bits would make the size
+    /// reported to the printer disagree with the actual payload (a DMA/RLE
+    /// decode desync). Width had an explicit check, height did not, and height
+    /// was only protected INDIRECTLY by the `MAX_LINES` limit in
+    /// `validate_page_header`. Making the fields `u16` forces the caller to
+    /// handle the conversion (`try_into`) explicitly and makes truncation
+    /// impossible at the type level.
     pub width_pixels: u16,
     pub height_pixels: u16,
     pub qpdl_version: u8,
@@ -376,25 +375,25 @@ impl Default for PageConfig {
 }
 
 // ============================================================================
-// Algo 0x11 RLE Sıkıştırıcı (SpliX / Samsung QPDL Uyumlu)
+// Algo 0x11 RLE compressor (SpliX / Samsung QPDL compatible)
 // ============================================================================
 
 pub struct Algo0x11;
 
 impl Algo0x11 {
     pub fn lookup_best_offsets(data: &[u8]) -> [u16; TABLE_PTR_SIZE] {
-        // Bu tablo 2048 x (u32, usize) = 32 KB tutar. Daha önce yığıtta
-        // (stack) bir dizi olarak duruyordu: ana iş parçacığının 8 MB'lık
-        // yığıtında sorun değil, ama kod ileride bir iş parçacığına taşınırsa
-        // (varsayılan 2 MB) sessiz bir yığıt taşması riski oluşturur. Bant
-        // başına bir tahsis, sıkıştırmanın kendi maliyetinin yanında ölçülemez
-        // düzeyde kaldığı için öbeğe (heap) taşındı.
+        // This table holds 2048 x (u32, usize) = 32 KB. It used to be a stack
+        // array: fine on the main thread's 8 MB stack, but if the code is later
+        // moved to a thread (default 2 MB) it risks a silent stack overflow.
+        // One allocation per band is immeasurable next to the cost of the
+        // compression itself, so it was moved to the heap.
         let mut occurrences: Vec<(u32, usize)> =
             (0..COMPRESS_SAMPLE_RATE).map(|i| (0u32, i)).collect();
 
-        // Veri örnekleme aralığından uzunsa her 2048 baytta bir örnek alınır;
-        // kısaysa aralık hiç dolmayacağı için her bayt taranır. İki durumun
-        // tek farkı tarama başlangıcı ve adımıdır.
+        // If the data is longer than the sampling interval, one sample is
+        // taken every 2048 bytes; if it is shorter, the interval never fills so
+        // every byte is scanned. The only difference between the two cases is
+        // the scan start and step.
         let (start, step) = if data.len() >= COMPRESS_SAMPLE_RATE {
             (COMPRESS_SAMPLE_RATE, COMPRESS_SAMPLE_RATE)
         } else {
@@ -415,8 +414,8 @@ impl Algo0x11 {
 
         occurrences.sort_unstable_by(|a, b| b.0.cmp(&a.0));
 
-        // En sık rastlanan 64 ofset. Tabloda 1 (bir önceki bayt) mutlaka
-        // bulunmalı; yoksa son sıra ona ayrılır.
+        // The 64 most frequent offsets. The table must contain 1 (the
+        // previous byte); if it does not, the last slot is reserved for it.
         let mut table = [1u16; TABLE_PTR_SIZE];
         for (slot, &(_, offset)) in table.iter_mut().zip(occurrences.iter()) {
             *slot = (offset + 1) as u16;
@@ -437,10 +436,10 @@ impl Algo0x11 {
         let max_output_size = data.len() + 256;
         let mut out = Vec::with_capacity(max_output_size);
 
-        // 1. uncompressed_initial_size için 4 bayt yer aç
+        // 1. Reserve 4 bytes for uncompressed_initial_size
         out.extend_from_slice(&[0u8; 4]);
 
-        // 2. 64 adet u16 ofset tablosu
+        // 2. The table of 64 u16 offsets
         let mut max_offset: usize = 0;
         for &ptr in &ptr_array {
             out.extend_from_slice(&ptr.to_le_bytes());
@@ -449,7 +448,7 @@ impl Algo0x11 {
             }
         }
 
-        // 3. İlk ham baytlar
+        // 3. The initial raw bytes
         let mut uncomp_size = max_offset.min(MAX_UNCOMPRESSED_BYTES).min(data.len());
         if uncomp_size == 0 {
             uncomp_size = 1.min(data.len());
@@ -478,20 +477,21 @@ impl Algo0x11 {
                     }
                     let r_ref = r - off;
 
-                    // Bu ofset mevcut en iyi eşleşmeyi GEÇEMEYECEKSE hiç
-                    // karşılaştırma yapma: eşleşme uzunluğu ancak
-                    // `best_comp_counter`'dan BÜYÜKSE dikkate alınıyor, o
-                    // hâlde `best_comp_counter`ıncı bayt tutmuyorsa bu aday
-                    // en fazla o kadar uzayabilir ve sonucu değiştiremez.
-                    // Klasik LZ kısayolu; seçilen eşleşmeyi ve işaretçiyi
-                    // aynen korur, yalnızca en kötü durumdaki bayt
-                    // karşılaştırma sayısını düşürür.
+                    // If this offset CANNOT BEAT the current best match, do no
+                    // comparison at all: a match length is only considered if
+                    // it is GREATER than `best_comp_counter`, so if the
+                    // `best_comp_counter`-th byte does not match, this candidate
+                    // can extend at most that far and cannot change the result.
+                    // The classic LZ shortcut; it preserves the selected match
+                    // and pointer exactly, and only lowers the worst-case byte
+                    // comparison count.
                     //
-                    // İndis güvenliği: döngü içindeyken `best_comp_counter`
-                    // her zaman `max_comp_size`'dan KÜÇÜKTÜR (eşit olduğu anda
-                    // aşağıda `break` edilir) ve `max_comp_size <= data.len() - r`
-                    // olduğu için `r + best_comp_counter < data.len()`;
-                    // `r_ref < r` olduğundan ikinci indis de sınır içindedir.
+                    // Index safety: inside the loop `best_comp_counter` is
+                    // always LESS than `max_comp_size` (the moment they are
+                    // equal, `break` fires below), and since
+                    // `max_comp_size <= data.len() - r`,
+                    // `r + best_comp_counter < data.len()`; because
+                    // `r_ref < r`, the second index is within bounds too.
                     if data[r + best_comp_counter] != data[r_ref + best_comp_counter] {
                         continue;
                     }
@@ -555,8 +555,8 @@ impl Algo0x11 {
         sum
     }
 
-    /// `compress`'in ürettiği akışı geri çözer (test/teşhis amaçlı).
-    /// Format spec'inin (bkz. gerçek SpliX algo0x11.cpp) ters uygulamasıdır.
+    /// Decompresses the stream `compress` produced (for tests/diagnostics).
+    /// It is the inverse of the format spec (see the real SpliX algo0x11.cpp).
     ///
     /// Exposed under `golden-replay` as well as `test` for the reason Q-6
     /// gives: a `#[cfg(test)]` item is invisible to another crate's tests, and
@@ -601,46 +601,47 @@ impl Algo0x11 {
 }
 
 // ============================================================================
-// SPL2 / QPDL Akış Yöneticisi (SplStreamWriter)
+// SPL2 / QPDL stream writer (SplStreamWriter)
 // ============================================================================
 
-/// PJL alanlarına (JOBNAME, USERNAME vb.) izin verilen azami BAYT sayısı.
+/// The maximum number of BYTES allowed in a PJL field (JOBNAME, USERNAME, etc.).
 ///
-/// PJL yorumlayıcıları genelde küçük, sabit boyutlu satır tamponları kullanır;
-/// bu üst sınır, gerçekçi bir belge başlığını/kullanıcı adını kesmeden,
-/// megabaytlarca metnin yazıcı firmware'ine gönderilmesini (olası çökme veya
-/// tampon taşması) engeller.
+/// PJL interpreters typically use small, fixed-size line buffers; this upper
+/// bound stops megabytes of text being sent to the printer firmware (a possible
+/// crash or buffer overflow) without cutting off a realistic document
+/// title/user name.
 ///
-/// Sınır kasıtlı olarak BAYT cinsindendir. Daha önce karakter sayılıyordu ve
-/// `.take(128)` bir `char` iteratörü üzerinde çalıştığı için çok baytlı UTF-8
-/// girdiyle gerçek sınır dört katına çıkabiliyordu: 400 emojilik bir iş adı
-/// 531 baytlık bir PJL satırı üretiyordu. `sanitize_pjl_field` çıktısı artık
-/// saf ASCII olduğu için bayt ve karakter sayısı da eşitlenmiş oluyor.
+/// The limit is deliberately in BYTES. It used to count characters, and because
+/// `.take(128)` ran over a `char` iterator, multi-byte UTF-8 input could
+/// quadruple the real limit: a 400-emoji job name produced a 531-byte PJL line.
+/// Since `sanitize_pjl_field`'s output is now pure ASCII, byte and character
+/// counts are equal.
 const MAX_PJL_FIELD_BYTES: usize = 128;
 
-/// Bir karakterin, PJL alanına doğrudan yazılabilecek kadar güvenli olup
-/// olmadığını söyler: yazdırılabilir ASCII (0x20-0x7E), çift tırnak hariç.
+/// Says whether a character is safe to write directly into a PJL field:
+/// printable ASCII (0x20-0x7E), excluding the double quote.
 ///
-/// Çift tırnak, alıntılanmış (`"..."`) alanı erken kapatabilir; PJL'de bir
-/// kaçış (escape) mekanizması olmadığı için kaçırmak yerine tamamen atılır.
+/// A double quote could close the quoted (`"..."`) field early; since PJL has
+/// no escape mechanism, it is dropped entirely rather than escaped.
 #[inline]
 fn is_safe_pjl_ascii(c: char) -> bool {
     matches!(c, ' '..='~') && c != '"'
 }
 
-/// ASCII dışı bir harfi, anlamını koruyan ASCII karşılığına katlar.
+/// Folds a non-ASCII letter to a meaning-preserving ASCII equivalent.
 ///
-/// Beyaz liste saf ASCII olduğu için Türkçe bir iş adı ("Öğrenci Başvurusu")
-/// aksi hâlde okunamaz hâle gelirdi ("renci Bavurusu"). Katlama, güvenlikten
-/// ödün vermeden okunabilirliği koruyor: çıktı yine tamamen 0x20-0x7E
-/// aralığında kalıyor ve yazıcı firmware'inin PJL sembol seti hakkında
-/// hiçbir varsayım yapılmıyor.
+/// Because the whitelist is pure ASCII, a Turkish job name ("Öğrenci
+/// Başvurusu") would otherwise become unreadable ("renci Bavurusu"). Folding
+/// preserves readability without giving up any safety: the output still stays
+/// entirely in 0x20-0x7E and makes no assumption about the printer firmware's
+/// PJL symbol set.
 ///
-/// Tablo Türkçe'yi tam kapsar; yaygın Batı Avrupa harfleri de eklenmiştir.
-/// Listede olmayan ASCII dışı her karakter (CJK, emoji, semboller) atılır.
+/// The table covers Turkish fully; common Western European letters are added
+/// too. Every non-ASCII character not in the list (CJK, emoji, symbols) is
+/// dropped.
 fn ascii_fold(c: char) -> Option<&'static str> {
     Some(match c {
-        // --- Türkçe ---
+        // --- Turkish ---
         'ç' => "c",
         'Ç' => "C",
         'ğ' => "g",
@@ -659,7 +660,7 @@ fn ascii_fold(c: char) -> Option<&'static str> {
         'Î' => "I",
         'û' => "u",
         'Û' => "U",
-        // --- Yaygın Batı Avrupa harfleri ---
+        // --- Common Western European letters ---
         'á' | 'à' | 'ä' | 'ã' | 'å' => "a",
         'Á' | 'À' | 'Ä' | 'Ã' | 'Å' => "A",
         'é' | 'è' | 'ê' | 'ë' => "e",
@@ -681,7 +682,7 @@ fn ascii_fold(c: char) -> Option<&'static str> {
         'æ' => "ae",
         'Æ' => "AE",
         'ß' => "ss",
-        // --- Orta/Doğu Avrupa (Latin Extended-A/B) ---
+        // --- Central/Eastern European (Latin Extended-A/B) ---
         'ć' | 'č' | 'ĉ' | 'ċ' => "c",
         'Ć' | 'Č' | 'Ĉ' | 'Ċ' => "C",
         'ś' | 'š' | 'ș' | 'ŝ' => "s",
@@ -729,10 +730,11 @@ fn ascii_fold(c: char) -> Option<&'static str> {
         'Ŧ' => "T",
         'ĳ' => "ij",
         'Ĳ' => "IJ",
-        // --- Tipografik noktalama ---
+        // --- Typographic punctuation ---
         '\u{2018}' | '\u{2019}' => "'",
-        // Eğri çift tırnaklar BOŞ dizeye katlanır, düz `"`'ye değil: düz tırnak
-        // alıntılanmış PJL alanını erken kapatırdı (bkz. is_safe_pjl_ascii).
+        // Curly double quotes fold to the EMPTY string, not to a straight `"`:
+        // a straight quote would close the quoted PJL field early (see
+        // is_safe_pjl_ascii).
         '\u{201C}' | '\u{201D}' => "",
         '\u{2013}' | '\u{2014}' => "-",
         '\u{2026}' => "...",
@@ -741,40 +743,40 @@ fn ascii_fold(c: char) -> Option<&'static str> {
     })
 }
 
-/// PJL akışına gömülecek serbest metin alanlarını (JOBNAME, USERNAME vb.)
-/// güvenli hale getirir.
+/// Makes the free-text fields embedded in the PJL stream (JOBNAME, USERNAME,
+/// etc.) safe.
 ///
-/// PJL satır tabanlıdır ve alıntılanmış (`"..."`) dizeleri için bir kaçış
-/// mekanizması yoktur: gömülen bir CR/LF ya da ESC (Universal Exit Language'ın
-/// başlangıcı) baytı, alanı erken sonlandırıp ardından gelen metnin yazıcı
-/// tarafından tamamen yeni, keyfi bir PJL komutu/işi olarak yorumlanmasına yol
-/// açabilir. `job_name`/`user_name` CUPS iş başlığından (dolayısıyla işi
-/// gönderen istemciden) geldiği için güvenilmez kabul edilmeli.
+/// PJL is line-based and has no escape mechanism for quoted (`"..."`) strings:
+/// an embedded CR/LF or ESC (the start of Universal Exit Language) byte could
+/// terminate the field early and make the printer interpret the following text
+/// as an entirely new, arbitrary PJL command/job. `job_name`/`user_name` come
+/// from the CUPS job title (hence from the client that submitted the job) and
+/// must be treated as untrusted.
 ///
-/// Süzgeç bir KARA LİSTE değil, bayt düzeyinde bir BEYAZ LİSTEdir. Önceki
-/// `char::is_control()` tabanlı kara liste `char` düzeyinde çalışıyordu, oysa
-/// yazıcıya giden şey bayt dizisidir: C1 aralığındaki (0x80-0x9F) her bayt,
-/// çok baytlı bir UTF-8 karakterinin DEVAM BAYTI olarak süzgeçten geçebiliyordu.
-/// Örneğin `U+02DB` telde `CB 9B` olur ve `0x9B` (C1 CSI) firmware'e ulaşırdı.
-/// Beyaz liste bunu yapısal olarak imkânsız kılar: çıktının her baytı
-/// 0x20-0x7E aralığındadır.
+/// The filter is not a BLACKLIST but a byte-level WHITELIST. The previous
+/// `char::is_control()`-based blacklist worked at the `char` level, whereas what
+/// goes to the printer is a byte sequence: any byte in the C1 range
+/// (0x80-0x9F) could pass the filter as a CONTINUATION BYTE of a multi-byte
+/// UTF-8 character. For example `U+02DB` is `CB 9B` on the wire, and `0x9B`
+/// (C1 CSI) would reach the firmware. The whitelist makes this structurally
+/// impossible: every byte of the output is in 0x20-0x7E.
 ///
-/// Enjeksiyon açısından kritik baytlar (`0x1B` ESC, `0x0A`, `0x0D`) zaten
-/// UTF-8'de ne öncü ne devam baytı olarak görünemez; beyaz liste bunları da
-/// kapsar ve garantiyi UTF-8 kodlamasının özelliğine değil, süzgecin kendisine
-/// dayandırır.
+/// The bytes critical for injection (`0x1B` ESC, `0x0A`, `0x0D`) cannot appear
+/// as either a leading or continuation byte in UTF-8 anyway; the whitelist
+/// covers them too and rests the guarantee on the filter itself, not on a
+/// property of the UTF-8 encoding.
 ///
-/// Uzunluk `MAX_PJL_FIELD_BYTES` ile bayt cinsinden sınırlanır ve sınır,
-/// katlama sonrası genişleyebilen diziler ("ß" -> "ss") da hesaba katılarak
-/// üretim sırasında uygulanır.
+/// The length is bounded in bytes by `MAX_PJL_FIELD_BYTES`, and the bound is
+/// applied during construction, accounting for sequences that can expand after
+/// folding ("ß" -> "ss").
 fn sanitize_pjl_field(input: &str) -> String {
     let mut out = String::with_capacity(MAX_PJL_FIELD_BYTES);
 
     for c in input.chars() {
-        // `piece` her zaman saf ASCII'dir, dolayısıyla len() == karakter sayısı.
+        // `piece` is always pure ASCII, so len() == character count.
         let piece: &str = if is_safe_pjl_ascii(c) {
-            // Tek ASCII karakteri kopyalamak için geçici bir tampon gerekmesin
-            // diye burada doğrudan itiyoruz.
+            // Push directly here so a single ASCII character needs no
+            // temporary buffer to copy through.
             if out.len() + 1 > MAX_PJL_FIELD_BYTES {
                 break;
             }
@@ -783,8 +785,8 @@ fn sanitize_pjl_field(input: &str) -> String {
         } else if let Some(folded) = ascii_fold(c) {
             folded
         } else {
-            // Beyaz listede olmayan her şey (kontrol karakterleri, bidi
-            // override, sıfır genişlikli karakterler, emoji, CJK) atılır.
+            // Everything not on the whitelist (control characters, bidi
+            // overrides, zero-width characters, emoji, CJK) is dropped.
             continue;
         };
 
@@ -800,14 +802,15 @@ fn sanitize_pjl_field(input: &str) -> String {
 
 pub struct SplStreamWriter<W: Write> {
     writer: W,
-    /// Sayfa içindeki bant sırası. QPDL kaydında 8 BİTLİK bir alan (`0x1`),
-    /// ama sayaç burada `u16` tutuluyor ki 256. bantta sessizce sarmak yerine
-    /// `u8::try_from` ile net bir hata versin (bkz. `write_compressed_band`).
+    /// The band index within the page. It is an 8-BIT field in the QPDL record
+    /// (`0x1`), but the counter is kept as `u16` here so that at band 256 it
+    /// gives a clear error via `u8::try_from` instead of silently wrapping (see
+    /// `write_compressed_band`).
     current_band: u16,
-    /// `begin_job` çağrıldı ama `end_job` henüz çağrılmadı mı?
+    /// Has `begin_job` been called but `end_job` not yet?
     ///
-    /// `Drop` uygulaması bunu okuyarak, yarıda kalan bir işin kapanış UEL'ini
-    /// yazmayı garanti eder; bkz. `impl Drop for SplStreamWriter`.
+    /// The `Drop` impl reads this to guarantee that a half-finished job's
+    /// closing UEL is written; see `impl Drop for SplStreamWriter`.
     job_active: bool,
 }
 
@@ -820,7 +823,6 @@ impl<W: Write> SplStreamWriter<W> {
         }
     }
 
-    /// Samsung ML-2160 serisi PJL Başlığını gönderir.
     /// Borrows the sink this writer wraps.
     ///
     /// The CUPS filter writes straight to stdout, but PAPPL hands its driver a
@@ -831,11 +833,11 @@ impl<W: Write> SplStreamWriter<W> {
     }
 
     pub fn begin_job(&mut self, config: &JobConfig) -> io::Result<()> {
-        // Gerçek SpliX (printer.cpp sendPJLHeader) sırası: UEL'den sonra doğrudan
-        // "@PJL DEFAULT SERVICEDATE=..." ile başlar; ayrı bir çıplak "@PJL\n" satırı
-        // GÖNDERİLMEZ. PowerSave/JamRecovery satırları da bu projenin PPD
-        // varsayılanlarına göre (PowerSave=5, JamRecovery=False) her zaman
-        // gönderilir.
+        // The real SpliX (printer.cpp sendPJLHeader) order: after the UEL it
+        // starts directly with "@PJL DEFAULT SERVICEDATE=..."; a separate bare
+        // "@PJL\n" line is NOT sent. The PowerSave/JamRecovery lines are always
+        // sent too, following this project's PPD defaults (PowerSave=5,
+        // JamRecovery=False).
         let mut pjl = Vec::with_capacity(256);
         pjl.extend_from_slice(PJL_UEL);
         pjl.extend_from_slice(
@@ -863,11 +865,11 @@ impl<W: Write> SplStreamWriter<W> {
         pjl.extend_from_slice(b"@PJL DEFAULT POWERSAVETIME=5\n");
         pjl.extend_from_slice(b"@PJL SET JAMRECOVERY=OFF\n");
 
-        // Gerçek SpliX (printer.cpp sendPJLHeader) duplex durumuna göre
-        // DUPLEX=ON/OFF ve (açıksa) BINDING=LONGEDGE/SHORTEDGE gönderir.
-        // SpliX printer.cpp sendPJLHeader; ELLE duplex `ON` değil `MANUAL`
-        // gönderir ve bu ayrım ML-2160 ailesi için önemlidir, çünkü bu
-        // modellerde duplex her zaman elledir (bkz. SplDuplex).
+        // The real SpliX (printer.cpp sendPJLHeader) sends DUPLEX=ON/OFF
+        // according to the duplex state and (if on) BINDING=LONGEDGE/SHORTEDGE.
+        // SpliX printer.cpp sendPJLHeader sends MANUAL, not `ON`, for MANUAL
+        // duplex, and this distinction matters for the ML-2160 family because
+        // duplex on these models is always manual (see SplDuplex).
         match config.duplex {
             SplDuplex::Simplex => {
                 pjl.extend_from_slice(b"@PJL SET DUPLEX=OFF\n");
@@ -890,12 +892,12 @@ impl<W: Write> SplStreamWriter<W> {
             }
         }
 
-        // SpliX printer.cpp sendPJLHeader, PPD'de bir `*MediaType` seçeneği
-        // varsa onun anahtarını `@PJL SET PAPERTYPE=%s` olarak gönderir,
-        // yoksa `OFF` yazar. Bu filtre seçeneği PPD'den değil CUPS Raster
-        // sayfa başlığındaki `MediaType` alanından okur (bkz. main.rs
-        // `pjl_paper_type_for`); `config.paper_type` oraya kadar `&'static
-        // str` olarak geldiği için burada ek bir süzgeç gerekmiyor.
+        // SpliX printer.cpp sendPJLHeader, if the PPD has a `*MediaType`
+        // option, sends its key as `@PJL SET PAPERTYPE=%s`, otherwise writes
+        // `OFF`. This filter reads the option not from the PPD but from the
+        // `MediaType` field in the CUPS Raster page header (see main.rs
+        // `pjl_paper_type_for`); because `config.paper_type` reaches here as a
+        // `&'static str`, no extra filtering is needed.
         pjl.extend_from_slice(format!("@PJL SET PAPERTYPE={}\n", config.paper_type).as_bytes());
         pjl.extend_from_slice(b"@PJL SET ALTITUDE=LOW\n");
         pjl.extend_from_slice(b"@PJL SET DENSITY=3\n");
@@ -905,19 +907,19 @@ impl<W: Write> SplStreamWriter<W> {
         self.writer.write_all(&pjl)?;
         self.writer.flush()?;
 
-        // Bu noktadan itibaren yazıcı QPDL dilindedir ve akışın mutlaka bir
-        // kapanış UEL'i ile bitmesi gerekir.
+        // From this point the printer is in QPDL language and the stream must
+        // end with a closing UEL.
         self.job_active = true;
         Ok(())
     }
 
-    /// Samsung QPDL 17-Baytlık Sayfa Başlığını Gönderir.
+    /// Sends the Samsung QPDL 17-byte page header.
     pub fn begin_page(&mut self, config: &PageConfig) -> io::Result<()> {
         self.current_band = 0;
 
         let mut header = [0u8; 17];
-        header[0x0] = 0x00; // Sayfa Başlığı İmzası
-        header[0x1] = (config.resolution_y.dpi() / 100) as u8; // DİKEY (Y) çözünürlük / 100
+        header[0x0] = 0x00; // page-header signature
+        header[0x1] = (config.resolution_y.dpi() / 100) as u8; // VERTICAL (Y) resolution / 100
         header[0x2] = (config.copies >> 8) as u8;
         header[0x3] = (config.copies & 0xFF) as u8;
         header[0x4] = config.paper_size as u8; // A4 = 2
@@ -926,7 +928,7 @@ impl<W: Write> SplStreamWriter<W> {
         header[0x9] = config.paper_source as u8; // Auto = 1
         header[0xA] = 0x00; // unknownByte1
 
-        // SpliX qpdl.cpp renderPage, duplex/tumble baytları:
+        // SpliX qpdl.cpp renderPage, the duplex/tumble bytes:
         //
         //   Simplex         : duplex = 1, tumble = 0
         //   LongEdge        : duplex = 1, tumble = pageNr % 2
@@ -934,11 +936,11 @@ impl<W: Write> SplStreamWriter<W> {
         //   ManualLongEdge  : duplex = 0, tumble = pageNr % 2
         //   ManualShortEdge : duplex = 0, tumble = pageNr % 2
         //
-        // `duplex` baytı sezgiye aykırıdır: Simplex'te 1, çift taraflı elle
-        // baskıda 0'dır. Bu değer eskiden doğru üretiliyordu, ama `tumble`
-        // koşulsuz 0 yazılıyordu; oysa SpliX'te SAYFA NUMARASININ PARİTESİDİR
-        // ve `_currentPage` 1'den başlar (document.cpp: `_currentPage = 1`),
-        // yani tek numaralı sayfalarda 1, çift numaralılarda 0 olur.
+        // The `duplex` byte is counter-intuitive: 1 for Simplex, 0 for manual
+        // duplex. This value used to be produced correctly, but `tumble` was
+        // written as an unconditional 0; in SpliX it is the PARITY OF THE PAGE
+        // NUMBER, and `_currentPage` starts at 1 (document.cpp:
+        // `_currentPage = 1`), so it is 1 on odd pages and 0 on even ones.
         header[0xB] = match config.duplex {
             SplDuplex::Simplex | SplDuplex::LongEdge => 1,
             SplDuplex::ShortEdge | SplDuplex::ManualLongEdge | SplDuplex::ManualShortEdge => 0,
@@ -949,35 +951,38 @@ impl<W: Write> SplStreamWriter<W> {
         };
         header[0xD] = 0x00; // unknownByte2
         header[0xE] = config.qpdl_version; // 3
-        header[0xF] = 0x01; // Colorplanes = 1 (Monokrom)
-        header[0x10] = (config.resolution_x.dpi() / 100) as u8; // YATAY (X) çözünürlük / 100
+        header[0xF] = 0x01; // Colorplanes = 1 (monochrome)
+        header[0x10] = (config.resolution_x.dpi() / 100) as u8; // HORIZONTAL (X) resolution / 100
 
         self.writer.write_all(&header)?;
         Ok(())
     }
 
-    /// Raster şeridini Algo 0x11 RLE sıkıştırması, alt-başlık ve checksum ile yazar.
+    /// Writes a raster band with Algo 0x11 RLE compression, the sub-header and
+    /// a checksum.
     ///
-    /// `band_width_pixels`: Yazıcı DMA motorunun satır atlama genişliği.
-    /// Satır kaymasını (zebra / merdiven deseni) önlemek için mutlaka tam bayt hizalı `bytes_per_line * 8` olmalıdır!
+    /// `band_width_pixels`: the printer DMA engine's line-stride width. To avoid
+    /// line skew (a zebra / staircase pattern) it MUST be the byte-aligned
+    /// `bytes_per_line * 8`.
     pub fn write_compressed_band(
         &mut self,
         band_width_pixels: u16,
         band_height_lines: u16,
         raw_bitmap: &[u8],
     ) -> io::Result<()> {
-        // Gerçek SpliX (compress.cpp compressPage/_compressBandedPage) hiçbir zaman
-        // ham/sıkıştırmasız (0x00) bant göndermez: yalnızca 0x0D/0x0E/0x11/0x13/0x15
-        // algoritmalarından biri kullanılır. Bu yazıcı ailesinde ham bant firmware
-        // tarafından tanınmıyor ("INTERNAL ERROR - Please use the proper driver"
-        // ile reddediliyor); bu yüzden burada da her zaman Algo 0x11 RLE kullanılır.
-        // `unwrap_or_default()` DEĞİL: `compress` bir `None` döndürdüğünde
-        // (bugün yalnızca girdi boşken; `band_size = bw_bytes * band_height`
-        // olduğu ve ikisi de sıfırdan büyük olduğu için pratikte erişilemez)
-        // boş bir `Vec` kullanmak, başlığı "Algo 0x11 ile sıkıştırılmış" diyen
-        // ama payload'u 0 bayt olan BOZUK bir bant kaydı üretirdi — yazıcı
-        // tarafında sessiz bir çözme hatası. Hata hatadır: yukarı bildiriliyor
-        // ve akış `Drop` üzerinden kapanış UEL'i ile düzgünce sonlandırılıyor.
+        // The real SpliX (compress.cpp compressPage/_compressBandedPage) never
+        // sends a raw/uncompressed (0x00) band: only one of the
+        // 0x0D/0x0E/0x11/0x13/0x15 algorithms is used. In this printer family a
+        // raw band is not recognised by the firmware (rejected with "INTERNAL
+        // ERROR - Please use the proper driver"); so Algo 0x11 RLE is always
+        // used here too. NOT `unwrap_or_default()`: when `compress` returns
+        // `None` (today only when the input is empty; unreachable in practice
+        // because `band_size = bw_bytes * band_height` and both are greater than
+        // zero), using an empty `Vec` would produce a CORRUPT band record whose
+        // header says "compressed with Algo 0x11" but whose payload is 0 bytes —
+        // a silent decode error on the printer side. An error is an error: it is
+        // reported upward and the stream is properly ended with a closing UEL
+        // via `Drop`.
         let payload_bytes = Algo0x11::compress(raw_bitmap).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -986,16 +991,16 @@ impl<W: Write> SplStreamWriter<W> {
         })?;
         let compression_type = SplCompression::Rle;
 
-        // Toplam veri boyutu: payload + 4 (sub-header sig) + 4 (checksum)
+        // Total data size: payload + 4 (sub-header sig) + 4 (checksum)
         let total_data_size = (payload_bytes.len() + 8) as u32;
 
-        // QPDL bant sırası alanı 8 bitliktir. Bugün taşması imkânsız: kabul
-        // edilen en büyük sayfada (Legal @1200 DPI => 16800 satır) 128
-        // satırlık bantlarla 132 bant eder. Ama kâğıt tablosu ya da
-        // `QPDL_BAND_HEIGHT` değiştiğinde sessizce bozulabilecek ÖRTÜK bir
-        // invaryanttı: `wrapping_add` 256. bantta sırayı 0'a döndürüp yazıcıya
-        // aynı sıra numarasını ikinci kez bildirirdi. Artık invaryant örtük
-        // değil, uygulanıyor.
+        // The QPDL band-order field is 8 bits. Overflow is impossible today: at
+        // the largest accepted page (Legal @1200 DPI => 16800 lines) 128-line
+        // bands make 132 bands. But it was an IMPLICIT invariant that could
+        // silently break if the paper table or `QPDL_BAND_HEIGHT` changed:
+        // `wrapping_add` would roll the order back to 0 at band 256 and report
+        // the same order number to the printer a second time. The invariant is
+        // now enforced rather than implicit.
         let band_index = u8::try_from(self.current_band).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -1008,7 +1013,7 @@ impl<W: Write> SplStreamWriter<W> {
             )
         })?;
 
-        // 1. Şerit Başlığı (Record 0x0C - 11 Bayt)
+        // 1. Band header (record 0x0C - 11 bytes)
         let mut band_header = [0u8; 11];
         band_header[0x0] = 0x0C; // Signature 12
         band_header[0x1] = band_index;
@@ -1024,13 +1029,13 @@ impl<W: Write> SplStreamWriter<W> {
 
         self.writer.write_all(&band_header)?;
 
-        // 2. Alt Başlık İmzası (Sub-header: 0x09ABCDEF LE)
+        // 2. Sub-header signature (0x09ABCDEF LE)
         self.writer.write_all(&SUBHEADER_SIG_LE)?;
 
-        // 3. Sıkıştırılmış (Algo 0x11 RLE) Şerit Verisi
+        // 3. Compressed (Algo 0x11 RLE) band data
         self.writer.write_all(&payload_bytes)?;
 
-        // 4. Sağlama Toplamı (Checksum: Subheader + Payload toplamı)
+        // 4. Checksum (sum of sub-header + payload)
         let mut checksum = Algo0x11::calculate_checksum(&SUBHEADER_SIG_LE);
         checksum = checksum.wrapping_add(Algo0x11::calculate_checksum(&payload_bytes));
 
@@ -1041,10 +1046,10 @@ impl<W: Write> SplStreamWriter<W> {
         Ok(())
     }
 
-    /// Sayfa Sonu (3 baytlık QPDL Page Footer: [0x01, copies_msb, copies_lsb])
+    /// Page end (the 3-byte QPDL page footer: [0x01, copies_msb, copies_lsb])
     pub fn end_page(&mut self, copies: u16) -> io::Result<()> {
         let footer = [
-            0x01, // Page Footer İmzası
+            0x01, // page-footer signature
             (copies >> 8) as u8,
             (copies & 0xFF) as u8,
         ];
@@ -1053,20 +1058,20 @@ impl<W: Write> SplStreamWriter<W> {
         Ok(())
     }
 
-    /// İş Sonu (PJL UEL Kapanışı)
+    /// Job end (the closing PJL UEL)
     ///
-    /// Gerçek SpliX (printer.cpp sendPJLFooter) `_endPJL`'i olduğu gibi yazıp
-    /// hemen flush eder; sona fazladan bir "\n" EKLEMEZ.
+    /// The real SpliX (printer.cpp sendPJLFooter) writes `_endPJL` verbatim and
+    /// flushes immediately; it does NOT append an extra "\n".
     ///
-    /// Çağrı idempotenttir: `begin_job` çağrılmamışsa ya da iş zaten
-    /// kapatılmışsa hiçbir şey yazmaz. Böylece `Drop` içindeki güvenlik ağı
-    /// (aşağıya bkz.) başarılı akışlarda ikinci bir UEL üretmez.
+    /// The call is idempotent: if `begin_job` was not called or the job is
+    /// already closed, it writes nothing. This keeps the safety net in `Drop`
+    /// (see below) from producing a second UEL on successful streams.
     pub fn end_job(&mut self) -> io::Result<()> {
         if !self.job_active {
             return Ok(());
         }
-        // Bayrağı yazmadan ÖNCE düşür: yazma başarısızsa (ör. backend boruyu
-        // kapattıysa) `Drop` aynı başarısız yazmayı tekrar denemesin.
+        // Clear the flag BEFORE writing: if the write fails (e.g. the backend
+        // closed the pipe), `Drop` must not retry the same failed write.
         self.job_active = false;
         self.writer.write_all(PJL_END)?;
         self.writer.flush()?;
@@ -1074,24 +1079,24 @@ impl<W: Write> SplStreamWriter<W> {
     }
 }
 
-/// Yarıda kalan bir işi kapanış UEL'i ile sonlandıran güvenlik ağı.
+/// The safety net that ends a half-finished job with a closing UEL.
 ///
-/// `begin_job` `@PJL ENTER LANGUAGE = QPDL` yazdığı anda yazıcı QPDL diline
-/// geçer. Akış kapanış UEL'i olmadan biterse yazıcı bu dilde, tamamlanmamış
-/// bir bant kaydını bekler hâlde asılı kalır ve sıradaki iş de bu artık
-/// duruma girer. Önceden `end_job` yalnızca sayfa döngüsü BAŞARIYLA bittiğinde
-/// çağrılıyordu; aradaki her `?` (başlık doğrulama hatası, kısa okuma, bozuk
-/// sayfa) akışı yarım bırakıyordu.
+/// The moment `begin_job` writes `@PJL ENTER LANGUAGE = QPDL`, the printer
+/// switches to QPDL. If the stream ends without a closing UEL, the printer
+/// hangs in that language waiting for an incomplete band record, and the next
+/// job enters this stale state too. `end_job` used to be called only when the
+/// page loop finished SUCCESSFULLY; every `?` in between (a header validation
+/// error, a short read, a corrupt page) left the stream half-finished.
 ///
-/// DİKKAT: `std::process::exit` yığındaki `Drop`'ları ÇALIŞTIRMAZ. Bu ağın
-/// işlemesi için writer'ın, hata `main`'e ulaşıp `exit` çağrılmadan önce
-/// düşürülmüş olması gerekir — bu yüzden writer `process_cups_raster_to_spl`
-/// içinde yerel olarak yaşar ve hata `?` ile döndürülür.
+/// NOTE: `std::process::exit` does NOT run the `Drop`s on the stack. For this
+/// net to work, the writer must have been dropped before the error reaches
+/// `main` and `exit` is called — which is why the writer lives locally in
+/// `process_cups_raster_to_spl` and the error is returned with `?`.
 impl<W: Write> Drop for SplStreamWriter<W> {
     fn drop(&mut self) {
         if self.job_active {
-            // Hatayı raporlayacak bir yer yok; akışı kapatmaya çalışmak yine de
-            // hiç denememekten iyidir.
+            // There is nowhere to report the error; trying to close the stream
+            // is still better than not trying at all.
             let _ = self.end_job();
         }
     }
@@ -1101,10 +1106,10 @@ impl<W: Write> Drop for SplStreamWriter<W> {
 mod tests {
     use super::*;
 
-    /// QPDL bant sırası alanı 8 bitliktir; 257. bant sessizce 0'a sarmak
-    /// yerine hata vermeli. Bugün erişilemez (en kötü durum 170 bant), ama
-    /// invaryant `MAX_POINTS`/`QPDL_BAND_HEIGHT` değiştiğinde bozulmasın diye
-    /// pinleniyor.
+    /// The QPDL band-order field is 8 bits; the 257th band must error rather
+    /// than silently wrap to 0. Unreachable today (worst case 170 bands), but
+    /// pinned so the invariant does not break if `MAX_POINTS`/`QPDL_BAND_HEIGHT`
+    /// change.
     #[test]
     fn test_band_index_beyond_255_is_rejected_not_wrapped() {
         let mut out: Vec<u8> = Vec::new();
@@ -1112,17 +1117,17 @@ mod tests {
         let band = vec![0u8; 8];
         for i in 0..=255u16 {
             w.write_compressed_band(64, 1, &band)
-                .unwrap_or_else(|e| panic!("bant {} reddedildi: {}", i, e));
+                .unwrap_or_else(|e| panic!("band {} rejected: {}", i, e));
         }
         let err = w
             .write_compressed_band(64, 1, &band)
-            .expect_err("257. bant hata vermeli");
+            .expect_err("the 257th band must error");
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("8 bits"), "{}", err);
     }
 
-    /// Sayaç sayfa başına sıfırlanır: art arda gelen sayfalar birbirinin
-    /// bant sırasını tüketmemeli.
+    /// The counter resets per page: consecutive pages must not consume each
+    /// other's band order.
     #[test]
     fn test_band_index_resets_on_each_page() {
         let mut out: Vec<u8> = Vec::new();
@@ -1136,7 +1141,7 @@ mod tests {
         }
     }
 
-    /// Tanınmayan bir ölçü A4'e ya da başka bir QPDL koduna düşürülmemeli.
+    /// An unrecognised size must not fall back to A4 or any other QPDL code.
     #[test]
     fn test_unknown_paper_size_is_rejected_instead_of_falling_back_to_a4() {
         assert_eq!(
@@ -1146,8 +1151,9 @@ mod tests {
         assert_eq!(SplPaperSize::from_dimensions_pt_exact(612, 936), None);
     }
 
-    /// DPI dönüşümü yaklaşık değerleri sessizce 300/600/1200'e yuvarlamamalı;
-    /// yalnızca PPD'nin sunduğu eksen değerleri ve doğrulanmış çiftler geçerli.
+    /// The DPI conversion must not silently round nearby values to
+    /// 300/600/1200; only the axis values the PPD offers and the validated
+    /// pairs are valid.
     #[test]
     fn test_resolution_mapping_is_exact_and_pair_aware() {
         assert_eq!(
@@ -1181,7 +1187,8 @@ mod tests {
         assert_eq!(service_date_from_unix_days(11_016), "20000229");
     }
 
-    /// Sıkıştırıcı payload üretemezse bant kaydı BOŞ payload'la yazılmamalı.
+    /// If the compressor produces no payload, the band record must not be
+    /// written with an EMPTY payload.
     #[test]
     fn test_empty_band_data_is_an_error_not_an_empty_record() {
         let mut out: Vec<u8> = Vec::new();
@@ -1189,23 +1196,23 @@ mod tests {
             let mut w = SplStreamWriter::new(&mut out);
             let err = w
                 .write_compressed_band(64, 1, &[])
-                .expect_err("boş bant verisi hata vermeli");
+                .expect_err("empty band data must error");
             assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         }
-        // `begin_job` çağrılmadığı için `Drop` da bir şey yazmamalı.
-        assert!(out.is_empty(), "hata durumunda hiçbir bayt yazılmamalı");
+        // Since `begin_job` was not called, `Drop` must not write anything either.
+        assert!(out.is_empty(), "no bytes must be written on error");
     }
 
     #[test]
     fn test_sanitize_pjl_field_strips_injection_chars() {
         assert_eq!(sanitize_pjl_field("Normal Title"), "Normal Title");
-        // Çift tırnak: alıntılanmış alanı erken kapatabilir.
+        // Double quote: could close the quoted field early.
         assert_eq!(sanitize_pjl_field("a\"b"), "ab");
-        // CR/LF: yeni bir PJL komut satırı başlatabilir.
+        // CR/LF: could start a new PJL command line.
         assert_eq!(sanitize_pjl_field("a\r\nb"), "ab");
-        // ESC: Universal Exit Language (@PJL zarfını erken bitirir).
+        // ESC: Universal Exit Language (ends the @PJL envelope early).
         assert_eq!(sanitize_pjl_field("a\x1bb"), "ab");
-        // Tam enjeksiyon denemesi: yeni bir @PJL komutu eklemeye çalışıyor.
+        // A full injection attempt: tries to add a new @PJL command.
         let injected = sanitize_pjl_field("x\"\n@PJL DEFAULT PASSWORD=1234\n");
         assert!(!injected.contains('"'));
         assert!(!injected.contains('\n'));
@@ -1214,30 +1221,35 @@ mod tests {
 
     #[test]
     fn test_sanitize_pjl_field_strips_unicode_line_separators() {
-        // U+2028/U+2029: is_control() bunları yakalamaz, ama bazı metin
-        // işleyicileri satır sonu sayabilir.
+        // U+2028/U+2029: is_control() does not catch these, but some text
+        // handlers may treat them as line breaks.
         assert_eq!(sanitize_pjl_field("a\u{2028}b"), "ab");
         assert_eq!(sanitize_pjl_field("a\u{2029}b"), "ab");
     }
 
     #[test]
     fn test_sanitize_pjl_field_strips_bidi_override_spoofing() {
-        // U+202E (RLO) ile "evil.exe" gibi bir dosya adı sahteciliği
-        // tekniğinin PJL alanlarında kullanıcı/iş adını farklı göstermesi
-        // engellenmeli.
+        // A filename-spoofing technique using U+202E (RLO) to make something
+        // like "evil.exe" appear different must be prevented from showing a
+        // different user/job name in PJL fields.
         let spoofed = sanitize_pjl_field("Invoice\u{202E}cod.exe");
         assert!(!spoofed.contains('\u{202E}'));
         assert_eq!(spoofed, "Invoicecod.exe");
 
-        // Diğer bidi gömme/izolasyon ve sıfır genişlikli karakterler de.
+        // Other bidi embedding/isolation and zero-width characters too.
         for c in ['\u{202A}', '\u{2066}', '\u{200B}', '\u{FEFF}'] {
             let s = format!("a{}b", c);
-            assert_eq!(sanitize_pjl_field(&s), "ab", "char {:?} süzülmedi", c);
+            assert_eq!(
+                sanitize_pjl_field(&s),
+                "ab",
+                "char {:?} was not filtered",
+                c
+            );
         }
     }
 
-    /// Beyaz liste saf ASCII olduğu için Türkçe metin katlanarak korunur;
-    /// harfler sessizce düşürülmez ("renci Bavurusu" olmaz).
+    /// Because the whitelist is pure ASCII, Turkish text is preserved by
+    /// folding; letters are not silently dropped (no "renci Bavurusu").
     #[test]
     fn test_sanitize_pjl_field_folds_turkish_to_ascii() {
         assert_eq!(sanitize_pjl_field("Öğrenci Başvurusu"), "Ogrenci Basvurusu");
@@ -1245,27 +1257,27 @@ mod tests {
         assert_eq!(sanitize_pjl_field("ışık İSTANBUL"), "isik ISTANBUL");
     }
 
-    /// Katlama tablosunda olmayan ASCII dışı karakterler atılır; çevrelerindeki
-    /// meşru metin korunur.
+    /// Non-ASCII characters not in the fold table are dropped; the legitimate
+    /// text around them is preserved.
     #[test]
     fn test_sanitize_pjl_field_drops_unmappable_non_ascii() {
         assert_eq!(sanitize_pjl_field("Rapor \u{1F600} 2026"), "Rapor  2026");
         assert_eq!(sanitize_pjl_field("会議 notes"), " notes");
     }
 
-    /// Katlama tablosu, Latin-1 Supplement'teki TÜM harfleri kapsamalı.
+    /// The fold table must cover ALL letters in the Latin-1 Supplement.
     ///
-    /// Beyaz liste güvenliği tablodan bağımsız garanti eder (kapsanmayan
-    /// karakter atılır, sızmaz); tablonun kapsamı yalnızca OKUNABİLİRLİĞİ
-    /// belirler. Bu test, Batı Avrupa alfabesindeki hiçbir harfin sessizce
-    /// düşmemesini sabitler.
+    /// The whitelist guarantees safety independently of the table (an uncovered
+    /// character is dropped, not leaked); the table's coverage only determines
+    /// READABILITY. This test pins that no letter in the Western European
+    /// alphabet is silently dropped.
     #[test]
     fn test_ascii_fold_covers_all_latin1_letters() {
         let mut missing = Vec::new();
         for cp in 0x00C0u32..=0x00FF {
             let c = char::from_u32(cp).unwrap();
             if c == '\u{00D7}' || c == '\u{00F7}' {
-                continue; // × ve ÷ harf değil, çarpma/bölme işaretleri
+                continue; // × and ÷ are not letters, but multiply/divide signs
             }
             match ascii_fold(c) {
                 Some(folded) if !folded.is_empty() && folded.is_ascii() => {}
@@ -1274,13 +1286,13 @@ mod tests {
         }
         assert!(
             missing.is_empty(),
-            "katlanamayan Latin-1 harfleri: {:?}",
+            "unfoldable Latin-1 letters: {:?}",
             missing
         );
     }
 
-    /// Katlama tablosunun HER çıktısı yazdırılabilir ASCII olmalı ve alanı
-    /// bozacak bir karakter içermemeli.
+    /// EVERY output of the fold table must be printable ASCII and contain no
+    /// character that would corrupt the field.
     #[test]
     fn test_ascii_fold_outputs_are_always_safe() {
         for cp in 0u32..0x2500 {
@@ -1288,13 +1300,13 @@ mod tests {
                 if let Some(folded) = ascii_fold(c) {
                     assert!(
                         folded.bytes().all(|b| (0x20..=0x7E).contains(&b)),
-                        "U+{:04X} yazdırılamayan bayta katlandı: {:?}",
+                        "U+{:04X} folded to a non-printable byte: {:?}",
                         cp,
                         folded
                     );
                     assert!(
                         !folded.contains('"'),
-                        "U+{:04X} çift tırnağa katlandı; alıntılanmış alanı bozar",
+                        "U+{:04X} folded to a double quote; corrupts the quoted field",
                         cp
                     );
                 }
@@ -1302,32 +1314,32 @@ mod tests {
         }
     }
 
-    /// O-03 regresyonu: çıktının HER baytı 0x20-0x7E aralığında olmalı.
+    /// O-03 regression: EVERY byte of the output must be in 0x20-0x7E.
     ///
-    /// Eski `char::is_control()` kara listesi `char` düzeyinde çalıştığı için
-    /// C1 aralığındaki baytlar çok baytlı UTF-8'in devam baytı olarak
-    /// sızabiliyordu: `U+02DB` telde `CB 9B` olur ve `0x9B` (C1 CSI)
-    /// firmware'e ulaşırdı.
+    /// Because the old `char::is_control()` blacklist worked at the `char`
+    /// level, bytes in the C1 range could leak as continuation bytes of
+    /// multi-byte UTF-8: `U+02DB` is `CB 9B` on the wire, and `0x9B` (C1 CSI)
+    /// would reach the firmware.
     #[test]
     fn test_sanitize_pjl_field_output_is_always_printable_ascii() {
         let hostile = "A\u{02DB}B\u{0219}C\u{1E9B}D\u{FF02}E\u{202E}F\u{1F4A9}";
         let out = sanitize_pjl_field(hostile);
         assert!(
             out.bytes().all(|b| (0x20..=0x7E).contains(&b)),
-            "yazdırılamayan bayt sızdı: {:?}",
+            "a non-printable byte leaked: {:?}",
             out.as_bytes()
         );
-        assert!(!out.as_bytes().contains(&0x9B), "C1 CSI baytı sızdı");
+        assert!(!out.as_bytes().contains(&0x9B), "a C1 CSI byte leaked");
         assert!(!out.contains('"'));
 
-        // Aynı garanti geniş bir Unicode taramasında da geçerli olmalı.
+        // The same guarantee must hold across a wide Unicode sweep too.
         for cp in (0u32..0x3000).chain(0x1F300..0x1F400) {
             if let Some(c) = char::from_u32(cp) {
                 let s = format!("x{}y", c);
                 let out = sanitize_pjl_field(&s);
                 assert!(
                     out.bytes().all(|b| (0x20..=0x7E).contains(&b)) && !out.contains('"'),
-                    "U+{:04X} güvensiz bayt üretti: {:?}",
+                    "U+{:04X} produced an unsafe byte: {:?}",
                     cp,
                     out.as_bytes()
                 );
@@ -1335,22 +1347,22 @@ mod tests {
         }
     }
 
-    /// O-02 regresyonu: sınır BAYT cinsinden olmalı.
+    /// O-02 regression: the limit must be in BYTES.
     ///
-    /// Karakter sayan eski sınır, çok baytlı UTF-8 ile gerçek satır uzunluğunu
-    /// dört katına çıkarabiliyordu (400 emojilik başlık -> 531 baytlık satır).
+    /// The old character-counting limit could quadruple the real line length
+    /// with multi-byte UTF-8 (a 400-emoji title -> a 531-byte line).
     #[test]
     fn test_sanitize_pjl_field_enforces_max_byte_length() {
         let huge = "A".repeat(1_000_000);
         assert_eq!(sanitize_pjl_field(&huge).len(), MAX_PJL_FIELD_BYTES);
 
-        // Çok baytlı girdi de aynı BAYT sınırına uymalı.
+        // Multi-byte input must obey the same BYTE limit too.
         for probe in ["Ö", "\u{1F600}", "ß", "ğ"] {
             let s = probe.repeat(4000);
             let out = sanitize_pjl_field(&s);
             assert!(
                 out.len() <= MAX_PJL_FIELD_BYTES,
-                "{:?} sınırı aştı: {} bayt",
+                "{:?} exceeded the limit: {} bytes",
                 probe,
                 out.len()
             );
@@ -1360,7 +1372,7 @@ mod tests {
         assert_eq!(sanitize_pjl_field(short), short);
     }
 
-    /// Katlanınca genişleyen diziler ("ß" -> "ss") sınırı taşırmamalı.
+    /// Sequences that expand when folded ("ß" -> "ss") must not overrun the limit.
     #[test]
     fn test_sanitize_pjl_field_respects_limit_for_expanding_folds() {
         let out = sanitize_pjl_field(&"ß".repeat(200));
@@ -1368,7 +1380,7 @@ mod tests {
         assert!(out.bytes().all(|b| b == b's'));
     }
 
-    /// Üretilen PJL satırının tamamı bayt sınırının makul bir katında kalmalı.
+    /// The whole produced PJL line must stay within a reasonable multiple of the byte limit.
     #[test]
     fn test_pjl_lines_stay_short_with_multibyte_input() {
         let cfg = JobConfig {
@@ -1387,7 +1399,7 @@ mod tests {
         for line in out.split(|&b| b == b'\n') {
             assert!(
                 line.len() <= MAX_PJL_FIELD_BYTES + 64,
-                "aşırı uzun PJL satırı: {} bayt",
+                "PJL line too long: {} bytes",
                 line.len()
             );
         }
@@ -1395,10 +1407,10 @@ mod tests {
 
     #[test]
     fn test_begin_job_blocks_pjl_line_injection() {
-        // Kötü niyetli girdi: tırnak + CR/LF ile alıntılanmış alandan kaçıp
-        // yeni bir "@PJL DEFAULT PASSWORD=..." satırı enjekte etmeye,
-        // ayrıca ESC (UEL) ile PJL zarfını erken bitirip yeni bir zarf/iş
-        // başlatmaya çalışıyor.
+        // Malicious input: with a quote + CR/LF it tries to escape the quoted
+        // field and inject a new "@PJL DEFAULT PASSWORD=..." line, and with ESC
+        // (UEL) it tries to end the PJL envelope early and start a new
+        // envelope/job.
         let malicious = JobConfig {
             job_name: "Evil\"\n@PJL DEFAULT PASSWORD=1234".to_string(),
             user_name: "attacker\x1b%-12345X@PJL SET JOBNAME=\"hijacked".to_string(),
@@ -1414,10 +1426,11 @@ mod tests {
             paper_type: PJL_PAPERTYPE_DEFAULT,
         };
 
-        // İşler açıkça kapatılır: writer düşerken `Drop` kapanış UEL'ini
-        // yazacağı için (bkz. test_drop_writes_closing_uel_for_unfinished_job)
-        // iki akış da tam bir iş olsun, aşağıdaki UEL sayımı yalnızca
-        // ENJEKTE EDİLMİŞ zarfları ölçsün.
+        // The jobs are closed explicitly: because `Drop` writes the closing
+        // UEL when the writer is dropped (see
+        // test_drop_writes_closing_uel_for_unfinished_job), both streams should
+        // be complete jobs so the UEL count below measures only INJECTED
+        // envelopes.
         let mut out_malicious: Vec<u8> = Vec::new();
         {
             let mut w = SplStreamWriter::new(&mut out_malicious);
@@ -1431,24 +1444,27 @@ mod tests {
             w.end_job().unwrap();
         }
 
-        // Kötü niyetli girdi, zararsız girdiyle AYNI sayıda PJL satırı
-        // üretmeli: sanitizasyon başarısız olsaydı gömülü "\n" ekstra
-        // satır(lar) enjekte ederdi.
+        // The malicious input must produce the SAME number of PJL lines as the
+        // benign one: if sanitisation failed, the embedded "\n" would inject
+        // extra line(s).
         let lines_malicious = out_malicious.iter().filter(|&&b| b == b'\n').count();
         let lines_benign = out_benign.iter().filter(|&&b| b == b'\n').count();
         assert_eq!(
             lines_malicious, lines_benign,
-            "girdi ekstra PJL komut satırı enjekte edebildi"
+            "the input was able to inject an extra PJL command line"
         );
 
-        // Akışta yalnızca işin kendi açılış ve kapanış UEL'i bulunmalı;
-        // girdi üçüncü bir zarf (yeni bir iş başlangıcı) ekleyememeli.
+        // The stream must contain only the job's own opening and closing UEL;
+        // the input must not be able to add a third envelope (a new job start).
         let uel_count = count_uel(&out_malicious);
         assert_eq!(uel_count, count_uel(&out_benign));
-        assert_eq!(uel_count, 2, "girdi yeni bir UEL zarfı enjekte edebildi");
+        assert_eq!(
+            uel_count, 2,
+            "the input was able to inject a new UEL envelope"
+        );
     }
 
-    /// Akıştaki UEL (yeni PJL zarfı) sayısını döner.
+    /// Returns the number of UELs (new PJL envelopes) in the stream.
     fn count_uel(stream: &[u8]) -> usize {
         stream
             .windows(PJL_UEL.len())
@@ -1456,12 +1472,12 @@ mod tests {
             .count()
     }
 
-    /// Y-03 regresyonu: `begin_job` çağrıldıktan sonra `end_job` çağrılmadan
-    /// writer düşerse, `Drop` kapanış UEL'ini yazmalı.
+    /// Y-03 regression: if the writer is dropped after `begin_job` without
+    /// `end_job`, `Drop` must write the closing UEL.
     ///
-    /// `begin_job` yazıcıyı `@PJL ENTER LANGUAGE = QPDL` ile QPDL diline
-    /// sokar; akış UEL olmadan biterse yazıcı bu dilde asılı kalır ve sonraki
-    /// iş de bozulur.
+    /// `begin_job` puts the printer into QPDL with `@PJL ENTER LANGUAGE = QPDL`;
+    /// if the stream ends without a UEL the printer hangs in that language and
+    /// the next job is corrupted too.
     #[test]
     fn test_drop_writes_closing_uel_for_unfinished_job() {
         let mut out: Vec<u8> = Vec::new();
@@ -1469,16 +1485,16 @@ mod tests {
             let mut w = SplStreamWriter::new(&mut out);
             w.begin_job(&JobConfig::default()).unwrap();
             w.begin_page(&PageConfig::default()).unwrap();
-            // end_job YOK: hata yolunu taklit ediyoruz.
+            // NO end_job: we imitate the error path.
         }
         assert!(
             out.ends_with(PJL_END),
-            "yarım kalan iş kapanış UEL'i olmadan bitti"
+            "the half-finished job ended without a closing UEL"
         );
-        assert_eq!(count_uel(&out), 2, "açılış + kapanış UEL'i beklenir");
+        assert_eq!(count_uel(&out), 2, "an opening + closing UEL is expected");
     }
 
-    /// `end_job` açıkça çağrıldıysa `Drop` ikinci bir UEL yazmamalı.
+    /// If `end_job` was called explicitly, `Drop` must not write a second UEL.
     #[test]
     fn test_drop_does_not_duplicate_uel_after_end_job() {
         let mut out: Vec<u8> = Vec::new();
@@ -1487,25 +1503,29 @@ mod tests {
             w.begin_job(&JobConfig::default()).unwrap();
             w.end_job().unwrap();
         }
-        assert_eq!(count_uel(&out), 2, "Drop fazladan UEL yazdı");
+        assert_eq!(count_uel(&out), 2, "Drop wrote an extra UEL");
     }
 
-    /// `begin_job` hiç çağrılmadıysa `Drop` hiçbir şey yazmamalı: yazıcı QPDL
-    /// diline hiç girmemiştir, yalnız başına bir UEL göndermenin anlamı yok.
+    /// If `begin_job` was never called, `Drop` must write nothing: the printer
+    /// never entered QPDL, so sending a lone UEL is meaningless.
     #[test]
     fn test_drop_writes_nothing_when_job_never_started() {
         let mut out: Vec<u8> = Vec::new();
         {
             let _w = SplStreamWriter::new(&mut out);
         }
-        assert!(out.is_empty(), "iş başlamadan çıktı üretildi: {:?}", out);
+        assert!(
+            out.is_empty(),
+            "output was produced before the job started: {:?}",
+            out
+        );
     }
 
-    /// D-02 regresyonu: QPDL sayfa başlığındaki 16-bit genişlik/yükseklik
-    /// alanları büyük-endian olarak, kırpılmadan yazılmalı.
+    /// D-02 regression: the 16-bit width/height fields in the QPDL page header
+    /// must be written big-endian, without truncation.
     ///
-    /// Alanlar `u16` olduğu için `u32`'den sessiz bir daralma artık tip
-    /// düzeyinde imkânsız; bu test kodlamanın kendisini sabitler.
+    /// Because the fields are `u16`, a silent narrowing from `u32` is now
+    /// impossible at the type level; this test pins the encoding itself.
     #[test]
     fn test_begin_page_encodes_16bit_dimensions() {
         let cfg = PageConfig {
@@ -1516,25 +1536,26 @@ mod tests {
         let mut out: Vec<u8> = Vec::new();
         SplStreamWriter::new(&mut out).begin_page(&cfg).unwrap();
 
-        assert_eq!(&out[0x5..0x7], &[0xFF, 0xFF], "genişlik kırpıldı");
-        assert_eq!(&out[0x7..0x9], &[0xAB, 0xCD], "yükseklik kırpıldı");
+        assert_eq!(&out[0x5..0x7], &[0xFF, 0xFF], "width truncated");
+        assert_eq!(&out[0x7..0x9], &[0xAB, 0xCD], "height truncated");
         assert_eq!(out.len(), 17);
     }
 
-    /// D-05 regresyonu: QPDL sayfa başlığında `header[0x1]` DİKEY (Y),
-    /// `header[0x10]` ise YATAY (X) çözünürlüğü taşır — bu sırada.
+    /// D-05 regression: in the QPDL page header `header[0x1]` carries the
+    /// VERTICAL (Y) and `header[0x10]` the HORIZONTAL (X) resolution — in that
+    /// order.
     ///
-    /// Kaynak, OpenPrinting SpliX qpdl.cpp renderPage:
+    /// Source, OpenPrinting SpliX qpdl.cpp renderPage:
     ///   header[0x1]  = page->yResolution() / 100;
     ///   header[0x10] = page->xResolution() / 100;
     ///
-    /// Sıra sezgiye aykırı olduğu için ("önce Y, sonra X") kolayca ters
-    /// yazılabilir. Daha önce tek bir alan vardı ve her iki bayta da YATAY
-    /// çözünürlük gidiyordu; simetrik modlarda görünmeyen, `1200x600dpi`'da
-    /// sayfayı dikeyde 2 kat ezen bir hataydı.
+    /// Because the order is counter-intuitive ("Y first, then X") it is easy to
+    /// write reversed. This used to be a single field with the HORIZONTAL
+    /// resolution written into both bytes; a bug invisible in symmetric modes
+    /// that squashed the page 2x vertically at `1200x600dpi`.
     #[test]
     fn test_begin_page_maps_resolution_axes_to_correct_bytes() {
-        // Asimetrik: X = 1200, Y = 600 (gerçek bir QPDL modu).
+        // Asymmetric: X = 1200, Y = 600 (a real QPDL mode).
         let cfg = PageConfig {
             resolution_x: SplResolution::Dpi1200,
             resolution_y: SplResolution::Dpi600,
@@ -1545,14 +1566,14 @@ mod tests {
 
         assert_eq!(
             out[0x1], 6,
-            "header[0x1] DİKEY (Y) çözünürlük olmalı: 600/100"
+            "header[0x1] must be the VERTICAL (Y) resolution: 600/100"
         );
         assert_eq!(
             out[0x10], 12,
-            "header[0x10] YATAY (X) çözünürlük olmalı: 1200/100"
+            "header[0x10] must be the HORIZONTAL (X) resolution: 1200/100"
         );
 
-        // Ters yön: eksenlerin gerçekten ayrı taşındığını kanıtlar.
+        // Reversed direction: proves the axes are really carried separately.
         let swapped = PageConfig {
             resolution_x: SplResolution::Dpi600,
             resolution_y: SplResolution::Dpi1200,
@@ -1565,7 +1586,7 @@ mod tests {
         assert_eq!(out2[0x1], 12);
         assert_eq!(out2[0x10], 6);
 
-        // Simetrik durumda iki bayt eşit (eski davranışla uyum).
+        // In the symmetric case the two bytes are equal (compatible with the old behaviour).
         for dpi in [
             SplResolution::Dpi300,
             SplResolution::Dpi600,
@@ -1583,9 +1604,9 @@ mod tests {
         }
     }
 
-    /// QPDL kağıt kaynağı kodları (SpliX printer.cpp) birebir taşınmalı;
-    /// `0` "seçilmedi" demektir ve Auto'ya düşer, tanınmayan değerler ise
-    /// sessizce bir koda dönüşmek yerine `None` verir.
+    /// The QPDL paper-source codes (SpliX printer.cpp) must be carried
+    /// one-to-one; `0` means "not selected" and falls back to Auto, while
+    /// unrecognised values return `None` rather than silently becoming a code.
     #[test]
     fn test_paper_source_from_media_position() {
         assert_eq!(
@@ -1620,30 +1641,30 @@ mod tests {
                 unknown
             );
         }
-        // Kodlar QPDL sayfa başlığına ham olarak yazıldığı için sayısal
-        // değerleri de sabitlensin.
+        // Because the codes are written raw into the QPDL page header, pin
+        // their numeric values too.
         assert_eq!(SplPaperSource::Auto as u8, 1);
         assert_eq!(SplPaperSource::Manual as u8, 2);
     }
 
-    /// PJL sözlüğü dışında hiçbir şey `PAPERTYPE` değerine dönüşemez.
+    /// Nothing outside the PJL vocabulary can become a `PAPERTYPE` value.
     #[test]
     fn test_pjl_paper_type_only_accepts_printer_vocabulary() {
         for known in PJL_PAPER_TYPES {
             assert_eq!(pjl_paper_type(known), Some(known));
-            // ASCII büyük/küçük harf farkı geri düşüşe yol açmamalı.
+            // An ASCII case difference must not cause a fallback.
             assert_eq!(pjl_paper_type(&known.to_ascii_lowercase()), Some(known));
-            // Baştaki/sondaki boşluklar (64 baytlık C dizesi) tolere edilmeli.
+            // Leading/trailing spaces (a 64-byte C string) must be tolerated.
             assert_eq!(pjl_paper_type(&format!("  {}  ", known)), Some(known));
         }
-        // Eski, okunabilir PPD adları artık protokol değeri değil.
+        // Old, human-readable PPD names are no longer protocol values.
         for unknown in ["", "Plain", "Envelope", "CardStock", "NORMAL\nEVIL", "EN V"] {
-            assert_eq!(pjl_paper_type(unknown), None, "{:?} kabul edildi", unknown);
+            assert_eq!(pjl_paper_type(unknown), None, "{:?} was accepted", unknown);
         }
     }
 
-    /// `PAPERTYPE` satırı TIRNAKSIZDIR: değere yalnızca tablodaki sabitler
-    /// girebildiği için satır hiçbir girdiyle bozulamaz.
+    /// The `PAPERTYPE` line is UNQUOTED: because only the table's constants can
+    /// enter the value, the line cannot be corrupted by any input.
     #[test]
     fn test_begin_job_emits_papertype_from_config() {
         for paper_type in PJL_PAPER_TYPES {
@@ -1660,18 +1681,18 @@ mod tests {
             let text = String::from_utf8_lossy(&out).into_owned();
             assert!(
                 text.contains(&format!("@PJL SET PAPERTYPE={}\n", paper_type)),
-                "{} yazılmadı: {}",
+                "{} was not written: {}",
                 paper_type,
                 text
             );
-            // Satır sayısı sabit kalmalı: değer hiçbir zaman satır bölmez.
-            // Simplex bir işte 12 satır var: SERVICEDATE, USERNAME, JOBNAME,
+            // The line count must stay fixed: the value never splits a line.
+            // A simplex job has 12 lines: SERVICEDATE, USERNAME, JOBNAME,
             // POWERSAVE, POWERSAVETIME, JAMRECOVERY, DUPLEX, PAPERTYPE,
             // ALTITUDE, DENSITY, RET, ENTER LANGUAGE.
             assert_eq!(
                 out.iter().filter(|&&b| b == b'\n').count(),
                 12,
-                "PJL satır sayısı değişti ({})",
+                "the PJL line count changed ({})",
                 paper_type
             );
         }
@@ -1687,7 +1708,7 @@ mod tests {
 
     #[test]
     fn test_algo0x11_roundtrip_synthetic() {
-        // Rastgele olmayan ama tekrarlı+değişken içerik: metin benzeri veri.
+        // Non-random but repetitive+varying content: text-like data.
         let mut sample = vec![0u8; 620 * 128];
         for (i, b) in sample.iter_mut().enumerate() {
             *b = ((i * 37 + (i / 620) * 13) % 251) as u8;
@@ -1711,7 +1732,7 @@ mod tests {
         let file = match File::open(path) {
             Ok(f) => f,
             Err(_) => {
-                eprintln!("SKIP: {} yok, test atlandı", path);
+                eprintln!("SKIP: {} does not exist, test skipped", path);
                 return;
             }
         };
@@ -1733,8 +1754,8 @@ mod tests {
         let mut band_data = vec![0u8; band_width_bytes * band_height];
         let mut found_band = None;
 
-        // Sayfanın en üstü genelde boş kenar boşluğudur; gerçek (tekdüze
-        // olmayan) içerik barındıran ilk bandı bulana kadar ilerle.
+        // The top of the page is usually blank margin; advance until the first
+        // band holding real (non-uniform) content is found.
         for band_idx in 0..(header.height as usize / band_height + 1) {
             for b in band_data.iter_mut() {
                 *b = 0;
@@ -1761,8 +1782,8 @@ mod tests {
             }
         }
 
-        let (band_idx, band_data) = found_band.expect("sayfada tekdüze olmayan bant bulunamadı");
-        eprintln!("Test icin secilen band: {}", band_idx);
+        let (band_idx, band_data) = found_band.expect("no non-uniform band found on the page");
+        eprintln!("Band selected for the test: {}", band_idx);
 
         let comp = Algo0x11::compress(&band_data).unwrap();
         let decomp = Algo0x11::decompress(&comp);

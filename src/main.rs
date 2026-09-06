@@ -5,7 +5,7 @@
 //! stderr and the page loop that drives the engine. Decision Q-5 freezes this
 //! binary's behaviour, so the golden corpus must not move when this file does.
 
-/// Altın dosya (golden file) koşum takımı; bkz. `src/golden.rs`.
+/// The golden-file test harness; see `src/golden.rs`.
 #[cfg(test)]
 mod golden;
 
@@ -72,17 +72,17 @@ fn validate_page_header(header: &PageHeader) -> io::Result<()> {
     validate_page_geometry(&geometry_of(header))
 }
 
-/// CUPS Filtre Argümanları
-/// Standart çağrı: `filter job-id user title num-copies options [filename]`
+/// CUPS filter arguments.
+/// Standard invocation: `filter job-id user title num-copies options [filename]`
 ///
-/// `num_copies` (argv[4]) ve `options` (argv[5]) KASITLI olarak okunmuyor;
-/// alanlar yalnızca teşhis ve konum doğruluğu için tutuluyor. Gerekçe: bu bir
-/// raster filtresidir ve zincirde kendisinden önce çalışan cups-filters aşaması
-/// (`gstoraster`/`pdftoraster`) PPD'yi zaten yorumlayıp seçilen medyayı,
-/// çözünürlüğü ve kopya sayısını CUPS Raster SAYFA BAŞLIĞINA yazar. Sayfa
-/// başlığı ile komut satırı çeliştiğinde bağlayıcı olan başlıktır — sayfa
-/// verisi ona göre üretilmiştir. Buradan seçenek okumak, üretilen veriyle
-/// çelişen bir başlık yazmak anlamına gelirdi.
+/// `num_copies` (argv[4]) and `options` (argv[5]) are DELIBERATELY not read;
+/// the fields are kept only for diagnostics and positional correctness. The
+/// reason: this is a raster filter, and the cups-filters stage that runs before
+/// it in the chain (`gstoraster`/`pdftoraster`) has already interpreted the PPD
+/// and written the selected media, resolution and copy count into the CUPS
+/// Raster PAGE HEADER. When the page header and the command line disagree, the
+/// header is binding — the page data was produced to match it. Reading options
+/// here would mean writing a header that contradicts the produced data.
 #[allow(dead_code)]
 #[derive(Default)]
 struct CupsFilterArgs {
@@ -106,7 +106,7 @@ impl CupsFilterArgs {
                 filename: args.get(6).cloned(),
             }
         } else if args.len() == 2 && !args[1].starts_with('-') {
-            // Doğrudan dosya modu: `cargo run -- dosya.raster`
+            // Direct file mode: `cargo run -- file.raster`
             Self {
                 filename: Some(args[1].clone()),
                 ..Self::default()
@@ -118,28 +118,28 @@ impl CupsFilterArgs {
 }
 
 fn main() {
-    // `env::args()` argv'de geçersiz UTF-8 baytı bulunca panic atar; ama bu
-    // argümanlar (`job-id user title copies options [file]`) `cupsd`
-    // tarafından işi gönderen istemcinin verdiği alanlardan (ör. job-name)
-    // türetiliyor ve güvenilmez kabul edilmeli. Bozuk/kötü niyetli bir başlık
-    // filtreyi daha ilk argümanı okurken çökertip DoS'a yol açmasın diye
-    // `env::args_os()` + kayıplı (lossy) UTF-8 dönüşümü kullanılıyor: geçersiz
-    // baytlar sessizce `U+FFFD` ile değiştirilir, panic olmaz.
+    // `env::args()` panics on an invalid UTF-8 byte in argv; but these
+    // arguments (`job-id user title copies options [file]`) are derived by
+    // `cupsd` from fields the submitting client supplied (e.g. job-name) and
+    // must be treated as untrusted. So that a corrupt/malicious header cannot
+    // crash the filter (a DoS) while it is still reading its first argument,
+    // `env::args_os()` + a lossy UTF-8 conversion is used: invalid bytes are
+    // silently replaced with `U+FFFD` and there is no panic.
     let raw_args: Vec<String> = env::args_os()
         .map(|s| s.to_string_lossy().into_owned())
         .collect();
 
-    // CUPS filtreleri normalde `filter job-id user title copies options [file]`
-    // (5-6 argüman) ile çağrılır. Programın hiç argümansız (yalnızca ikili
-    // dosya adıyla) çalıştırılması gerçek bir `cupsd` çağrısı değildir — ya
-    // yanlış kurulumdur ya da elle/keşif amaçlı bir çalıştırmadır. Bu araca
-    // en yakın mimari eşdeğerler olan `/usr/lib/cups/filter/rastertopwg` ve
-    // `pstops` çalıştırılarak doğrulandı: ikisi de bu durumda bir
-    // "Usage: ..." mesajı basıp 1 koduyla çıkıyor; CUPS *backend*'lerine
-    // özgü olan "desteklenen MIME türlerini listeleyip 0 ile çık" davranışını
-    // UYGULAMIYORLAR (o davranış filtreler için değil, aygıt keşfi yapan
-    // backend'ler içindir). Bu yüzden burada da aynı yaklaşım izleniyor: boş
-    // stdin okumayı denemeden önce net bir kullanım mesajıyla erken çıkılıyor.
+    // CUPS filters are normally invoked with
+    // `filter job-id user title copies options [file]` (5-6 arguments). Running
+    // the program with no arguments at all (just the binary name) is not a real
+    // `cupsd` invocation — it is either a misconfiguration or a manual/probing
+    // run. This was verified by running the closest architectural equivalents
+    // of this tool, `/usr/lib/cups/filter/rastertopwg` and `pstops`: both print
+    // a "Usage: ..." message and exit with code 1 in this case; they do NOT
+    // implement the "list supported MIME types and exit 0" behaviour specific
+    // to CUPS *backends* (that behaviour is for device-discovering backends,
+    // not for filters). So the same approach is taken here: exit early with a
+    // clear usage message before attempting to read an empty stdin.
     if raw_args.len() <= 1 {
         let prog = raw_args
             .first()
@@ -151,14 +151,13 @@ fn main() {
 
     let args = CupsFilterArgs::parse(&raw_args);
 
-    // `user`, `title` ve `job_id`, işi gönderen istemciden (CUPS üzerinden)
-    // geldiği için güvenilmez kabul edilmeli: `{}` yerine `{:?}` (Debug)
-    // kullanmak, gömülü ANSI/terminal kaçış dizilerini ve kontrol
-    // karakterlerini (ör. ESC, CR) `\u{1b}` gibi kaçırılmış (escaped)
-    // biçimde yazdırarak sahte log satırı enjeksiyonunu ya da terminal
-    // emülatörü zafiyetlerinin tetiklenmesini önler. Normal akışta `job_id`
-    // sayısal bir dize olsa da, filtre manipüle edilmiş argümanlarla elle
-    // çağrıldığında bu garanti yoktur.
+    // `user`, `title` and `job_id` come from the submitting client (via CUPS)
+    // and must be treated as untrusted: using `{:?}` (Debug) instead of `{}`
+    // prints embedded ANSI/terminal escape sequences and control characters
+    // (e.g. ESC, CR) in escaped form like `\u{1b}`, preventing fake log-line
+    // injection or triggering terminal-emulator vulnerabilities. Although
+    // `job_id` is a numeric string in the normal flow, that guarantee does not
+    // hold when the filter is invoked by hand with manipulated arguments.
     if let (Some(job), Some(user)) = (&args.job_id, &args.user) {
         eprintln!("DEBUG: CUPS Job ID: {:?}, User: {:?}", job, user);
     }
@@ -169,14 +168,14 @@ fn main() {
     let input_reader: Box<dyn Read> = match &args.filename {
         Some(path) => {
             eprintln!(
-                "DEBUG: CUPS Raster dosyadan okunuyor: {}",
+                "DEBUG: reading CUPS Raster from file: {}",
                 quote_untrusted(path)
             );
             match File::open(path) {
                 Ok(file) => Box::new(BufReader::new(file)),
                 Err(err) => {
                     eprintln!(
-                        "ERROR: Raster dosyası açılamadı {}: {}",
+                        "ERROR: could not open the raster file {}: {}",
                         quote_untrusted(path),
                         err
                     );
@@ -185,37 +184,37 @@ fn main() {
             }
         }
         None => {
-            eprintln!("DEBUG: CUPS Raster standart girdiden (stdin) okunuyor");
+            eprintln!("DEBUG: reading CUPS Raster from standard input (stdin)");
             Box::new(BufReader::new(io::stdin()))
         }
     };
 
-    // `process_cups_raster_to_spl` `SplStreamWriter`'ı YEREL olarak tutar:
-    // hata `?` ile döndüğünde writer bu satıra gelmeden düşer ve `Drop`
-    // uygulaması kapanış UEL'ini yazar. `process::exit` `Drop` çalıştırmadığı
-    // için sıralama önemlidir — hata burada, writer çoktan düştükten sonra
-    // raporlanır.
+    // `process_cups_raster_to_spl` keeps the `SplStreamWriter` LOCAL: when an
+    // error returns via `?`, the writer is dropped before reaching this line
+    // and its `Drop` impl writes the closing UEL. Because `process::exit` does
+    // not run `Drop`, the ordering matters — the error is reported here, after
+    // the writer has already been dropped.
     if let Err(err) =
         process_cups_raster_to_spl(&args, input_reader, io::stdout(), &current_service_date())
     {
-        eprintln!("ERROR: Raster işleme hatası: {}", err);
+        eprintln!("ERROR: raster processing error: {}", err);
         process::exit(1);
     }
 }
 
-/// Standart CUPS Raster akışını okur ve Samsung QPDL/SPL2 formatına dönüştürür.
+/// Reads the standard CUPS Raster stream and converts it to Samsung QPDL/SPL2.
 ///
-/// `writer` parametre olarak alınır (doğrudan `io::stdout()` kullanılmaz) ki
-/// testler üretilen SPL akışını inceleyebilsin; özellikle hata yollarında
-/// kapanış UEL'inin yazıldığını doğrulamak için gerekli.
+/// `writer` is taken as a parameter (rather than using `io::stdout()` directly)
+/// so tests can inspect the produced SPL stream; in particular it is needed to
+/// verify that the closing UEL is written on error paths.
 ///
-/// `service_date` de aynı gerekçeyle DIŞARIDAN veriliyor (doğrudan
-/// `current_service_date()` çağrılmıyor): `@PJL DEFAULT SERVICEDATE` satırı
-/// bugünün tarihini taşıdığı için üretilen akış saate bağımlı olurdu ve
-/// altın dosya (golden file) karşılaştırması her gece yarısı kırılırdı.
-/// Tarihi sabitlemek yerine karşılaştırmayı gevşetmek, gerçek sapmaları da
-/// gizlerdi; bkz. `src/golden.rs`. `main` yine `current_service_date()`
-/// geçiyor, yani çalışma zamanı davranışı değişmiyor.
+/// `service_date` is supplied FROM OUTSIDE for the same reason (rather than
+/// calling `current_service_date()` directly): because the
+/// `@PJL DEFAULT SERVICEDATE` line carries today's date, the produced stream
+/// would be clock-dependent and the golden-file comparison would break every
+/// midnight. Loosening the comparison instead of fixing the date would also
+/// hide real deviations; see `src/golden.rs`. `main` still passes
+/// `current_service_date()`, so runtime behaviour does not change.
 fn process_cups_raster_to_spl<W: Write>(
     args: &CupsFilterArgs,
     reader: Box<dyn Read>,
@@ -240,11 +239,11 @@ fn process_with_margin<W: Write>(
             "invalid driver hard margin",
         ));
     }
-    // 1. CUPS Raster başlık/magic kontrolü (RaSt, RaS2, RaS3 vb.)
+    // 1. CUPS Raster header/magic check (RaSt, RaS2, RaS3, etc.)
     let mut raster_reader = CupsRasterReader::new(reader)?;
 
     eprintln!(
-        "INFO: Geçerli CUPS Raster akışı tespit edildi (Sürüm: {:?}, Endian: {})",
+        "INFO: valid CUPS Raster stream detected (version: {:?}, endian: {})",
         raster_reader.version(),
         if raster_reader.version().is_big_endian() {
             "Big Endian"
@@ -255,10 +254,10 @@ fn process_with_margin<W: Write>(
 
     let mut spl_writer = SplStreamWriter::new(writer);
 
-    // İlk sayfa başlığını, işi başlatmadan (begin_job) önce oku: CUPS Raster
-    // duplex bilgisini SAYFA başlığında taşır, ama PJL iş başlığı duplex'i
-    // İŞ seviyesinde bildirmek zorunda. Bu yüzden ilk başlığı "peek" edip iş
-    // yapılandırmasını buna göre kuruyoruz; döngüde tekrar okumuyoruz.
+    // Read the first page header before starting the job (begin_job): CUPS
+    // Raster carries the duplex information in the PAGE header, but the PJL job
+    // header must report duplex at the JOB level. So we "peek" the first header
+    // and set up the job config from it; we do not read it again in the loop.
     let mut next_header = raster_reader.next_page_header()?;
 
     let job_duplex = match &next_header {
@@ -266,16 +265,16 @@ fn process_with_margin<W: Write>(
         None => spl::SplDuplex::Simplex,
     };
 
-    // Kağıt türü de duplex gibi İŞ seviyesinde (PJL) bildirilir, oysa CUPS
-    // onu SAYFA başlığında taşır; bu yüzden aynı "ilk başlığı peek et"
-    // kalıbı kullanılıyor. Sayfa başına farklı bir kağıt türü QPDL'de zaten
-    // ifade edilemiyor.
+    // The paper type, like duplex, is reported at the JOB level (PJL), whereas
+    // CUPS carries it in the PAGE header; so the same "peek the first header"
+    // pattern is used. A different paper type per page cannot be expressed in
+    // QPDL anyway.
     let job_paper_type = match &next_header {
         Some(h) => pjl_paper_type_for(&h.media_type, &CupsFilterLog),
         None => spl::PJL_PAPERTYPE_DEFAULT,
     };
 
-    // 2. Samsung ML-2160 serisi PJL Başlığı (@PJL ENTER LANGUAGE = QPDL)
+    // 2. Samsung ML-2160 series PJL header (@PJL ENTER LANGUAGE = QPDL)
     let job_config = JobConfig {
         job_name: args
             .title
@@ -291,54 +290,55 @@ fn process_with_margin<W: Write>(
     let mut page_number = 0;
     let mut budget = JobBudget::default();
 
-    // 3. Sayfa Döngüsü
+    // 3. Page loop
     while let Some(header) = next_header.take() {
         validate_page_header(&header)?;
 
-        // Kopya sayısı bir kez normalize edilir ve hem bütçeye hem yazıcıya
-        // AYNI değer gider; iki yerde ayrı ayrı hesaplamak, bütçenin fiilen
-        // basılmayacak kopyaları saymasına yol açardı.
+        // The copy count is normalised once and the SAME value goes to both
+        // the budget and the printer; computing it separately in two places
+        // would make the budget count copies that are never actually printed.
         let geometry = geometry_of(&header);
         let copies = spl2_core::geometry::sanitize_copies(header.num_copies);
 
-        // Sayfa sayısı, ham raster hacmi ve yaprak sayısı sınırları; gerekçe
-        // için `JobBudget`e bakın. Doğrulamadan SONRA sayılıyor, böylece
-        // reddedilen bir sayfa bütçeyi tüketmez.
+        // The page-count, raw-raster-volume and sheet-count limits; see
+        // `JobBudget` for the rationale. Counted AFTER validation, so a
+        // rejected page does not consume the budget.
         page_number = budget.account_page(geometry.total_raster_bytes(), copies)?;
 
-        // `sanitize_copies` ile aynı değer loglanır: aksi halde bu satır,
-        // yazıcıya fiilen gönderilen (aşağıda begin_page/end_page ile
-        // sanitize_copies() üzerinden yazılan) kopya sayısından farklı,
-        // ham/sınırsız `header.num_copies` değerini gösterip yanıltıcı
-        // teşhis bilgisi üretebilirdi (ör. 65536 istenirse burada "65536"
-        // yazılır ama yazıcıya 999 gönderilirdi).
+        // The same value as `sanitize_copies` is logged: otherwise this line
+        // could show the raw/unbounded `header.num_copies` value, different
+        // from the copy count actually sent to the printer (written below via
+        // begin_page/end_page through sanitize_copies()), producing misleading
+        // diagnostics (e.g. if 65536 is requested, "65536" would be written here
+        // but 999 sent to the printer).
         eprintln!("PAGE: {} {}", page_number, copies);
-        eprintln!("INFO: Sayfa {} başlatılıyor...", page_number);
+        eprintln!("INFO: starting page {}...", page_number);
 
         print_header_info(page_number, &header);
 
-        // `cupsCompression`, CUPS Raster'da AKIŞ sıkıştırması değil, sürücüye
-        // özel bir "cihaz sıkıştırması" ipucudur (akış sıkıştırması sync
-        // sözcüğüyle belirlenir; bkz. raster.rs is_compressed). SpliX bu alanı
-        // kullanmaz, bu filtre de bant sıkıştırmasını her zaman Algo 0x11 ile
-        // yapar; dolayısıyla alan bilinçli olarak yok sayılıyor. Sıfırdan
-        // farklıysa, PPD ile bu filtrenin varsayımları arasında bir uyuşmazlık
-        // olabileceği için teşhis amaçlı bir kez bildiriyoruz.
+        // `cupsCompression` in CUPS Raster is not STREAM compression but a
+        // driver-specific "device compression" hint (stream compression is
+        // determined by the sync word; see raster.rs is_compressed). SpliX does
+        // not use this field, and this filter always does band compression with
+        // Algo 0x11; so the field is deliberately ignored. If it is non-zero we
+        // report it once for diagnostics, because there may be a mismatch
+        // between the PPD and this filter's assumptions.
         if header.compression != 0 {
             eprintln!(
-                "WARNING: cupsCompression={} yok sayıldı; bant sıkıştırması her zaman Algo 0x11 RLE.",
+                "WARNING: cupsCompression={} ignored; band compression is always Algo 0x11 RLE.",
                 header.compression
             );
         }
 
-        // Geometri, yerleşim ve 17-baytlık sayfa başlığı artık `spl2-core`'da:
-        // aynı hesap PAPPL yolunda da çalışıyor, böylece iki ön uç ayrışamaz.
+        // Geometry, placement and the 17-byte page header are now in
+        // `spl2-core`: the same computation runs on the PAPPL path too, so the
+        // two front ends cannot diverge.
         let setup = PageSetup::new(&geometry, margin_pt, page_number, &CupsFilterLog)?;
 
-        // 17-Baytlık QPDL Sayfa Başlığı
+        // The 17-byte QPDL page header
         spl_writer.begin_page(&setup.config)?;
 
-        // Sayfa şeritlerini SpliX uyumlu stride ile aktar
+        // Transfer the page bands with the SpliX-compatible stride
         let mut encoder = setup.encoder();
         let mut line_buffer = vec![0u8; setup.cups_bytes_per_line];
         for _ in 0..setup.total_lines {
@@ -347,84 +347,84 @@ fn process_with_margin<W: Write>(
         }
         encoder.finish(&mut spl_writer)?;
 
-        // 3-Baytlık QPDL Sayfa Sonu
+        // The 3-byte QPDL page footer
         spl_writer.end_page(copies)?;
 
-        eprintln!("INFO: Sayfa {} tamamlandı.\n", page_number);
+        eprintln!("INFO: page {} complete.\n", page_number);
 
         next_header = raster_reader.next_page_header()?;
     }
 
     if page_number == 0 {
-        eprintln!("WARNING: CUPS Raster akışında sayfa bulunamadı.");
+        eprintln!("WARNING: no pages found in the CUPS Raster stream.");
     } else {
         eprintln!(
-            "INFO: Toplam {} sayfa başarıyla SPL/QPDL formatına dönüştürüldü.",
+            "INFO: {} pages successfully converted to SPL/QPDL format.",
             page_number
         );
     }
 
-    // İş Sonu (PJL UEL). Sayfa bulunamamış olsa bile çağrılır: `begin_job`
-    // yazıcıyı çoktan QPDL diline soktuğu için akış her hâlükârda kapanış
-    // UEL'i ile bitmelidir. `end_job` içeride flush eder.
+    // Job end (the PJL UEL). Called even if no page was found: because
+    // `begin_job` has already put the printer into QPDL, the stream must end
+    // with a closing UEL in any case. `end_job` flushes internally.
     spl_writer.end_job()?;
     Ok(())
 }
 
-/// CUPS Raster sayfa başlığından elde edilen meta verileri formatlayıp stderr'e basar.
+/// Formats the metadata from the CUPS Raster page header and prints it to stderr.
 fn print_header_info(page_num: u32, header: &PageHeader) {
-    // Her satır `DEBUG: ` ile başlıyor. CUPS, bir filtrenin stderr'inde
-    // tanıdığı önekleri (DEBUG/INFO/WARNING/ERROR/PAGE/...) o seviyeye
-    // yönlendirir; ÖNEKSİZ satırları da DEBUG sayar, yani varsayılan
-    // `LogLevel warn` altında davranış aynıdır. Fark `LogLevel debug`ta ortaya
-    // çıkıyordu: bu blok sayfa başına ~15 satır üretiyor ve öneksiz satırlar
-    // niyeti belirsiz bırakıyordu. Önek, satırların teşhis amaçlı olduğunu
-    // hem CUPS'a hem logu okuyana açıkça söyler.
+    // Every line starts with `DEBUG: `. CUPS routes the prefixes it recognises
+    // in a filter's stderr (DEBUG/INFO/WARNING/ERROR/PAGE/...) to that level;
+    // it also treats UNPREFIXED lines as DEBUG, so under the default
+    // `LogLevel warn` the behaviour is the same. The difference showed up at
+    // `LogLevel debug`: this block produces ~15 lines per page and the
+    // unprefixed lines left the intent unclear. The prefix tells both CUPS and
+    // the log reader plainly that the lines are diagnostic.
     eprintln!("DEBUG: --------------------------------------------------");
-    eprintln!("DEBUG:  [CUPS RASTER SAYFA {} META VERİLERİ]", page_num);
+    eprintln!("DEBUG:  [CUPS RASTER PAGE {} METADATA]", page_num);
     eprintln!(
-        "DEBUG:   Çözünürlük (DPI): {} x {}",
+        "DEBUG:   Resolution (DPI): {} x {}",
         header.hw_resolution[0], header.hw_resolution[1]
     );
     eprintln!(
-        "DEBUG:   Boyutlar (px)   : {} x {} (Genişlik x Yükseklik)",
+        "DEBUG:   Dimensions (px) : {} x {} (width x height)",
         header.width, header.height
     );
     eprintln!(
-        "DEBUG:   Sayfa Boyutu(pt): {} x {} pt",
+        "DEBUG:   Page size (pt)  : {} x {} pt",
         header.page_size_points[0], header.page_size_points[1]
     );
     if let Some(name) = &header.page_size_name {
-        // `cupsPageSizeName` raster başlığındaki 64 baytlık bir C dizesidir ve
-        // işi gönderen istemciden gelir — argv'deki `title`/`user` kadar
-        // güvenilmezdir, bu yüzden ham değil kaçırılmış olarak basılır.
-        eprintln!("DEBUG:   Medya Adı       : {}", quote_untrusted(name));
+        // `cupsPageSizeName` is a 64-byte C string in the raster header coming
+        // from the submitting client — as untrusted as `title`/`user` in argv,
+        // so it is printed escaped rather than raw.
+        eprintln!("DEBUG:   Media name      : {}", quote_untrusted(name));
     }
-    eprintln!("DEBUG:   Renk Uzayı      : {}", header.color_space);
-    eprintln!("DEBUG:   Renk Dizilimi   : {:?}", header.color_order);
-    eprintln!("DEBUG:   Kanal Bit Derin.: {}", header.bits_per_color);
-    eprintln!("DEBUG:   Piksel Bit Der. : {}", header.bits_per_pixel);
-    eprintln!("DEBUG:   Satır Bayt Say. : {} bayt", header.bytes_per_line);
+    eprintln!("DEBUG:   Colour space    : {}", header.color_space);
+    eprintln!("DEBUG:   Colour order    : {:?}", header.color_order);
+    eprintln!("DEBUG:   Bits per colour : {}", header.bits_per_color);
+    eprintln!("DEBUG:   Bits per pixel  : {}", header.bits_per_pixel);
+    eprintln!("DEBUG:   Bytes per line  : {} bytes", header.bytes_per_line);
     eprintln!(
-        "DEBUG:   Ham Raster Boy. : {} bayt ({:.2} MB)",
+        "DEBUG:   Raw raster size : {} bytes ({:.2} MB)",
         header.total_raster_bytes(),
         header.total_raster_bytes() as f64 / (1024.0 * 1024.0)
     );
     eprintln!(
-        "DEBUG:   Çift Taraflı    : {}",
-        if header.duplex { "Açık" } else { "Kapalı" }
+        "DEBUG:   Duplex          : {}",
+        if header.duplex { "on" } else { "off" }
     );
-    eprintln!("DEBUG:   Kopya Sayısı    : {}", header.num_copies);
+    eprintln!("DEBUG:   Copies          : {}", header.num_copies);
     eprintln!(
-        "DEBUG:   Kağıt Kaynağı   : MediaPosition={} -> {:?}",
+        "DEBUG:   Paper source    : MediaPosition={} -> {:?}",
         header.media_position,
         SplPaperSource::from_media_position(header.media_position)
     );
-    // Uyarıyı `pjl_paper_type_for` iş başlığı kurulurken bir kez basıyor;
-    // burada yalnızca eşlemenin sonucu gösteriliyor (sayfa başına tekrar
-    // eden bir uyarı üretmemek için).
+    // `pjl_paper_type_for` prints the warning once while the job header is set
+    // up; here only the result of the mapping is shown (to avoid a warning
+    // repeated per page).
     eprintln!(
-        "DEBUG:   Kağıt Türü      : MediaType={} -> PAPERTYPE={}",
+        "DEBUG:   Paper type      : MediaType={} -> PAPERTYPE={}",
         quote_untrusted(&header.media_type),
         spl::pjl_paper_type(&header.media_type).unwrap_or(spl::PJL_PAPERTYPE_DEFAULT)
     );
@@ -442,24 +442,24 @@ mod tests {
     use spl2_core::raster::CupsRasterVersion;
     use std::io::Cursor;
 
-    /// Argümansız (doğrudan boru hattı) çağrıyı temsil eder.
+    /// Represents an argument-less (direct pipeline) invocation.
     fn no_args() -> CupsFilterArgs {
         CupsFilterArgs::default()
     }
 
-    /// Projenin PPD dosyasını okur. Aşağıdaki testlerin bir bölümü, filtrenin
-    /// sabitlerini PPD'nin gerçek içeriğine bağlar: PPD'ye yeni bir seçenek
-    /// eklendiğinde sabitleri güncellemeyi unutmak testi kırar.
+    /// Reads the project's PPD file. Some of the tests below tie the filter's
+    /// constants to the PPD's real contents: forgetting to update the constants
+    /// when a new option is added to the PPD breaks the test.
     fn ppd_text() -> String {
         std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/ppd/samsung-ml2160.ppd"
         ))
-        .expect("PPD okunamadı")
+        .expect("could not read the PPD")
     }
 
-    /// PPD'nin sunduğu `*Resolution` seçenekleri, (x_dpi, y_dpi) olarak.
-    /// `600dpi` gibi tek değerli adlar iki eksene de yazılır.
+    /// The `*Resolution` options the PPD offers, as (x_dpi, y_dpi). Single-value
+    /// names like `600dpi` are written to both axes.
     fn ppd_resolutions() -> Vec<(u32, u32)> {
         let ppd = ppd_text();
         let list: Vec<(u32, u32)> = ppd
@@ -469,7 +469,7 @@ mod tests {
                 let name = rest.split('/').next().unwrap_or("").trim_end_matches("dpi");
                 let parse = |v: &str| {
                     v.parse::<u32>()
-                        .unwrap_or_else(|_| panic!("PPD çözünürlüğü ayrıştırılamadı: {}", line))
+                        .unwrap_or_else(|_| panic!("could not parse PPD resolution: {}", line))
                 };
                 Some(match name.split_once('x') {
                     Some((x, y)) => (parse(x), parse(y)),
@@ -479,27 +479,29 @@ mod tests {
             .collect();
         assert!(
             list.len() >= 4,
-            "PPD'den çözünürlük okunamadı: {}",
+            "no resolutions read from the PPD: {}",
             list.len()
         );
         list
     }
 
-    /// PPD'nin sunduğu `*PaperDimension` seçenekleri, (ad, genişlik_pt,
-    /// yükseklik_pt) olarak. Ondalık yazılmış ölçüler tavana yuvarlanır.
+    /// The `*PaperDimension` options the PPD offers, as (name, width_pt,
+    /// height_pt). Sizes written with decimals are rounded up.
     fn ppd_paper_dimensions() -> Vec<(String, u32, u32)> {
         let ppd = ppd_text();
         let list: Vec<(String, u32, u32)> = ppd
             .lines()
             .filter_map(|line| {
                 let rest = line.strip_prefix("*PaperDimension ")?;
-                let (name, dims) = rest.split_once(':').expect("bozuk *PaperDimension satırı");
+                let (name, dims) = rest
+                    .split_once(':')
+                    .expect("malformed *PaperDimension line");
                 let name = name.split('/').next().unwrap().trim().to_string();
                 let mut it = dims.trim().trim_matches('"').split_whitespace();
                 let mut pt = || {
                     it.next()
                         .and_then(|v| v.parse::<f64>().ok())
-                        .unwrap_or_else(|| panic!("PPD kağıt boyutu ayrıştırılamadı: {}", line))
+                        .unwrap_or_else(|| panic!("could not parse PPD paper size: {}", line))
                         .ceil() as u32
                 };
                 let (w, h) = (pt(), pt());
@@ -508,7 +510,7 @@ mod tests {
             .collect();
         assert!(
             list.len() >= 10,
-            "PPD'den kağıt boyutu okunamadı: {}",
+            "no paper sizes read from the PPD: {}",
             list.len()
         );
         list
@@ -523,15 +525,15 @@ mod tests {
             sanitize_copies(MAX_REALISTIC_COPIES as u32),
             MAX_REALISTIC_COPIES
         );
-        // Eski davranış: `.max(1) as u16` burada 0 döndürüyordu.
+        // Old behaviour: `.max(1) as u16` returned 0 here.
         assert_eq!(sanitize_copies(65536), MAX_REALISTIC_COPIES);
         assert_eq!(sanitize_copies(131072), MAX_REALISTIC_COPIES);
         assert_eq!(sanitize_copies(u32::MAX), MAX_REALISTIC_COPIES);
     }
 
-    /// A4, 600 DPI, 1-bit monokrom (K), tutarlı `bytesPerLine`'a sahip
-    /// geçerli bir başlık üretir; testler bunu temel alıp tek bir alanı
-    /// bozarak `validate_page_header`'ın onu reddettiğini doğrular.
+    /// Produces a valid header: A4, 600 DPI, 1-bit monochrome (K), with a
+    /// consistent `bytesPerLine`; tests base themselves on it and corrupt a
+    /// single field to verify that `validate_page_header` rejects it.
     fn valid_header() -> PageHeader {
         let mut buf = vec![0u8; 1796];
         buf[276..280].copy_from_slice(&600u32.to_be_bytes()); // hw_resolution[0]
@@ -558,10 +560,10 @@ mod tests {
             let mut header = valid_header();
             header.hw_resolution = resolution;
             let err = validate_page_header(&header)
-                .expect_err("PPD dışındaki çözünürlük reddedilmeliydi");
+                .expect_err("a resolution outside the PPD should have been rejected");
             assert!(
                 err.to_string().contains("unsupported resolution"),
-                "{}x{} için yanlış hata: {}",
+                "wrong error for {}x{}: {}",
                 resolution[0],
                 resolution[1],
                 err
@@ -574,7 +576,7 @@ mod tests {
         let mut header = valid_header();
         header.page_size_points = [612, 936];
         let err = validate_page_header(&header)
-            .expect_err("QPDL kodu olmayan kâğıt ölçüsü reddedilmeliydi");
+            .expect_err("a paper size with no QPDL code should have been rejected");
         assert!(
             err.to_string().contains("unsupported paper size"),
             "{}",
@@ -591,7 +593,7 @@ mod tests {
 
     #[test]
     fn test_validate_page_header_rejects_wrong_bit_depth() {
-        // 24-bit RGB / 32-bit CMYK gibi çok bitli bir akış simüle edilir.
+        // Simulates a multi-bit stream like 24-bit RGB / 32-bit CMYK.
         let mut header = valid_header();
         header.bits_per_color = 8;
         header.bits_per_pixel = 24;
@@ -601,14 +603,14 @@ mod tests {
     #[test]
     fn test_validate_page_header_rejects_inconsistent_bytes_per_line() {
         let mut header = valid_header();
-        header.bytes_per_line = 999; // width=8, bits_per_pixel=1 ile uyuşmuyor
+        header.bytes_per_line = 999; // inconsistent with width=8, bits_per_pixel=1
         assert!(validate_page_header(&header).is_err());
     }
 
-    /// Geçerli, tek sayfalık, sıkıştırmasız bir V3 Big-Endian raster akışı
-    /// üretir. `pixel_bytes`, sayfa verisinin kaç baytının yazılacağını
-    /// belirler; başlıkta bildirilenden az vermek kısa okuma (hata) yolunu
-    /// tetikler.
+    /// Produces a valid, single-page, uncompressed V3 big-endian raster
+    /// stream. `pixel_bytes` decides how many bytes of page data are written;
+    /// giving fewer than the header declares triggers the short-read (error)
+    /// path.
     fn v3_stream(pixel_bytes: usize) -> Vec<u8> {
         let mut buf = vec![0u8; 1796];
         let mut put = |off: usize, val: u32| {
@@ -631,9 +633,9 @@ mod tests {
         stream
     }
 
-    /// İstenen geometri/duplex ile çok sayfalı, sıkıştırmasız (v3) bir CUPS
-    /// Raster akışı kurar. `v3_stream` sabit A4/600 DPI üretiyor; bu esnek
-    /// sürüm çözünürlük ve duplex bayraklarını değiştirebilmek için var.
+    /// Builds a multi-page, uncompressed (v3) CUPS Raster stream with the
+    /// requested geometry/duplex. `v3_stream` produces a fixed A4/600 DPI; this
+    /// flexible version exists so the resolution and duplex flags can be varied.
     struct RasterSpec {
         res_x: u32,
         res_y: u32,
@@ -645,17 +647,17 @@ mod tests {
         pages: usize,
         /// CUPS `MediaPosition` (PPD `*InputSlot`).
         media_position: u32,
-        /// CUPS `MediaType` (PPD `*MediaType`); boş = seçilmemiş.
+        /// CUPS `MediaType` (PPD `*MediaType`); empty = not selected.
         media_type: &'static str,
-        /// CUPS `Margins[0]` (PPD `*ImageableArea`nın sol kenar boşluğu, pt).
+        /// CUPS `Margins[0]` (the left margin of the PPD `*ImageableArea`, pt).
         margin_left_pt: u32,
-        /// Her raster satırı için kullanılacak desen; `None` = tamamen boş
-        /// satır. Uzunluğu `bytes_per_line()` olmalıdır.
+        /// The pattern to use for each raster line; `None` = a fully blank
+        /// line. Its length must be `bytes_per_line()`.
         line_pattern: Option<Vec<u8>>,
     }
 
     impl RasterSpec {
-        /// A4, verilen çözünürlükte sayfa genişliğine tam oturan bir sayfa.
+        /// A4, a page that fits the page width exactly at the given resolution.
         fn a4(res_x: u32, res_y: u32, height: u32) -> Self {
             let width_px = compute_page_width_pixels(595, res_x);
             Self {
@@ -692,7 +694,7 @@ mod tests {
                 put(280, self.res_y);
                 put(352, self.page_pt.0);
                 put(356, self.page_pt.1);
-                put(368, self.tumble as u32); // Tumble (cupsWidth'ten hemen önce)
+                put(368, self.tumble as u32); // Tumble (immediately before cupsWidth)
                 put(372, self.width_px);
                 put(376, self.height);
                 put(384, 1); // bits_per_color
@@ -707,7 +709,7 @@ mod tests {
                         assert_eq!(
                             pattern.len(),
                             self.bytes_per_line() as usize,
-                            "desen satır uzunluğuyla uyuşmuyor"
+                            "the pattern does not match the line length"
                         );
                         pattern.clone()
                     }
@@ -721,11 +723,11 @@ mod tests {
         }
     }
 
-    /// Üretilen SPL akışındaki İLK şerit kaydının payload'ını çözüp,
-    /// `stream_page_bands`'in yazdığı bant tamponunu (terslemeden ÖNCEKİ
-    /// hâliyle) geri verir.
+    /// Decodes the payload of the FIRST band record in the produced SPL stream
+    /// and returns the band buffer `stream_page_bands` wrote (in its state
+    /// BEFORE inversion).
     ///
-    /// Tampon transpozedir: `band[col * band_height + y]`.
+    /// The buffer is transposed: `band[col * band_height + y]`.
     fn first_band_buffer(out: &[u8]) -> Vec<u8> {
         // Kayıt konumu deterministik olarak bulunur: 0x0C baytını aramak
         // güvenli değil, çünkü sayfa başlığının 0x4 baytı da (EnvIsoB5 kağıt

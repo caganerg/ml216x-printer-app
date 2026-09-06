@@ -70,23 +70,24 @@ impl PageSetup {
             ));
         }
 
-        // SpliX pageWidth hesabı: fiziksel sayfa genişliğini DPI ile piksele çevir, 8'e hizala
+        // SpliX pageWidth computation: convert the physical page width from points to
+        // pixels via the DPI, then align up to 8.
         // SpliX document.cpp: pageWidth = ((ceil(pageSizePt * dpi / 72) + 7) & ~7)
         let page_width_pixels =
             compute_page_width_pixels(geometry.page_size_points[0], geometry.hw_resolution[0]);
 
-        // SpliX compress.cpp (M2026 öncesi orijinal mantık):
+        // SpliX compress.cpp (the original pre-M2026 logic):
         //   bandWidthInB = lineWidthInB = (pageWidth + 7) / 8
         //   bandWidth = bandWidthInB * 8
-        // ML-2160 serisi için 256-hizalama kullanılmıyor.
+        // The ML-2160 series does not use 256-alignment.
         let band_width_bytes = page_width_pixels.div_ceil(8);
         let band_width_pixels = band_width_bytes * 8;
 
-        // QPDL sayfa/bant kayıtlarındaki genişlik ve yükseklik alanları
-        // 16-bit'tir. Değerleri `as u16` ile sessizce kırpmak, yazıcıya
-        // bildirilen boyut ile gerçek payload'ın uyuşmamasına (DMA/RLE çözme
-        // senkron kaybı) yol açar; bunun yerine `try_into` ile erken ve net
-        // bir hata döndürüyoruz.
+        // The width and height fields in QPDL page/band records are 16-bit.
+        // Truncating the values silently with `as u16` would make the size
+        // reported to the printer disagree with the actual payload (a DMA/RLE
+        // decode desync); instead we return an early, explicit error via
+        // `try_into`.
         let to_u16 = |value: u32, field: &str| -> io::Result<u16> {
             u16::try_from(value).map_err(|_| {
                 io::Error::new(
@@ -98,17 +99,17 @@ impl PageSetup {
         let band_width_u16 = to_u16(band_width_pixels, "Band width")?;
         let page_height_u16 = to_u16(geometry.height, "Page height")?;
 
-        // CUPS raster verisi (595B) bant genişliğinde (620B) ortalanır, sonra
-        // yazıcının sert kenar boşluğu düşülür; bkz. `band_placement`.
+        // The CUPS raster data (595 B) is centred in the band width (620 B),
+        // then the printer's hard margin is subtracted; see `band_placement`.
         let cups_line_bytes = geometry.bytes_per_line as usize;
         let hard_margin = hard_margin_bytes(margin_pt, geometry.hw_resolution[0]);
         let placement = band_placement(band_width_bytes as usize, cups_line_bytes, hard_margin)?;
         if (band_width_bytes as usize) < cups_line_bytes {
-            // Uyarı yerleşimden SONRA basılıyor, çünkü hangi kenarın kırpıldığı
-            // `src_skip`e bağlı: bant satırdan darken sert kenar boşluğu da
-            // varsa satırın solundan bayt atılır, yani yalnızca sağ kenar
-            // kırpılmaz. Operatörü yanlış kenara yönlendirmemek için ikisi de
-            // söyleniyor.
+            // The warning is printed AFTER placement, because which edge is
+            // clipped depends on `src_skip`: when the band is narrower than the
+            // line and there is also a hard margin, bytes are dropped from the
+            // left of the line too, so it is not only the right edge. Both are
+            // stated so the operator is not pointed at the wrong edge.
             let left_note = if placement.src_skip > 0 {
                 format!(
                     " and {} B will be dropped from their left edge for the hard margin",
@@ -142,9 +143,9 @@ impl PageSetup {
             ),
         );
 
-        // `validate_page_geometry` bilinmeyen ölçüleri reddeder. Buradaki ikinci
-        // kontrol, bu dönüşüm ileride doğrulamadan ayrı bir çağrı yoluna taşınsa
-        // bile A4'e sessiz bir geri düşüşün yeniden oluşmasını engeller.
+        // `validate_page_geometry` rejects unknown sizes. This second check
+        // stops a silent fallback to A4 from re-appearing even if this
+        // conversion is later moved to a call path separate from validation.
         let paper_size = SplPaperSize::from_dimensions_pt_exact(
             geometry.page_size_points[0],
             geometry.page_size_points[1],
@@ -197,8 +198,9 @@ impl PageSetup {
             config: PageConfig {
                 paper_size,
                 paper_source,
-                // Eksenler AYRI: QPDL `header[0x1]` dikey, `header[0x10]` yatay
-                // çözünürlüğü taşır (bkz. qpdl.rs PageConfig).
+                // The axes are SEPARATE: QPDL `header[0x1]` carries the vertical
+                // and `header[0x10]` the horizontal resolution (see qpdl.rs
+                // PageConfig).
                 resolution_x,
                 resolution_y,
                 duplex: duplex_mode(geometry.duplex, geometry.tumble),
@@ -292,17 +294,16 @@ impl BandEncoder {
             ));
         }
         if self.lines_in_band == 0 {
-            // Son bant eksik satırlı olabileceğinden sıfırlama zorunlu.
+            // The last band may have fewer lines, so zeroing it is required.
             self.band.fill(0);
         }
 
-        // SpliX algo0x11.h: Algo0x11::reverseLineColumn() == true, yani
-        // compress.cpp'deki _compressBandedPage bant tamponunu SÜTUN-ÖNCELİKLİ
-        // (transpoze) doldurur:
+        // SpliX algo0x11.h: Algo0x11::reverseLineColumn() == true, so
+        // _compressBandedPage in compress.cpp fills the band buffer
+        // COLUMN-MAJOR (transposed):
         //   band[x * bandHeight + y] = planes[i][x + hardMarginXInB + ...]
-        // Satır-öncelikli (row-major) doldurma, sıkıştırma kendisi doğru
-        // çalışsa bile yazıcının transpoze edilmiş/gürültülü bir görüntü
-        // çözmesine yol açar.
+        // A row-major fill makes the printer decode a transposed/noisy image
+        // even when the compression itself is correct.
         let y = self.lines_in_band;
         for (c, &byte) in line[self.placement.src_skip..]
             .iter()
@@ -339,11 +340,11 @@ impl BandEncoder {
     }
 
     fn flush<W: Write>(&mut self, writer: &mut SplStreamWriter<W>) -> io::Result<()> {
-        // Samsung ML-2160 serisi QPDL lazer motoru, CUPS K renk uzayının TERSİ
-        // polariteyle çalışır:
-        //   CUPS K:     0 = beyaz (toner yok),  1 = siyah (toner var)
-        //   Samsung:    0 = siyah (toner bas),   1 = beyaz (toner yok)
-        // Empirik test: tersleme olmadan sayfa simsiyah çıkıyor.
+        // The Samsung ML-2160 series QPDL laser engine works with the OPPOSITE
+        // polarity to the CUPS K colour space:
+        //   CUPS K:     0 = white (no toner),  1 = black (toner)
+        //   Samsung:    0 = black (lay toner), 1 = white (no toner)
+        // Empirically: without inversion the page comes out solid black.
         for b in &mut self.band {
             *b = !*b;
         }

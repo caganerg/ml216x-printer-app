@@ -21,26 +21,25 @@ use crate::qpdl::{self, SplDuplex, SplPaperSize, SplResolution};
 /// Diagnostics sink; see [`crate::log`].
 use crate::log::{Level, Log};
 
-/// CUPS Renk Uzayı (`cups_cspace_e`) — ham sayısal kod.
+/// CUPS colour space (`cups_cspace_e`) — the raw numeric code.
 ///
-/// Spesifikasyon 40'tan fazla renk uzayı tanımlar, ama bu sürücü yalnızca
-/// `K` ile çalışır: diğer her değer `validate_page_header` tarafından
-/// reddedilir. Bu yüzden uzayların tamamını ayrı ayrı modellemek yerine ham
-/// kod saklanıyor. Karar veren iki nokta da (K kontrolü ve v2 çözücüsünün
-/// boş renk dolgusu) zaten sayısal kodla çalışır; adlar yalnızca hata
-/// mesajlarında görünür.
+/// The specification defines more than 40 colour spaces, but this driver works
+/// only with `K`: every other value is rejected by `validate_page_header`. So
+/// rather than model every space separately, the raw code is stored. Both
+/// decision points (the K check and the v2 decoder's blank-colour fill) work
+/// with the numeric code anyway; the names appear only in error messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CupsColorSpace(pub u32);
 
 impl CupsColorSpace {
-    /// Siyah-tonlama (0 = siyah). Samsung lazer motorunun beklediği tek uzay.
+    /// Additive black: 0 means no toner (white). The encoder inverts it for Samsung.
     pub const K: CupsColorSpace = CupsColorSpace(3);
 
-    /// `n == 128` (satır sonuna kadar boşalt) kaydında kullanılacak dolgu.
+    /// The fill used in the `n == 128` record (blank to end of line).
     ///
-    /// libcups, toner/mürekkep EKLEYEN uzaylarda — K (3), CMY (4), CMYK (5),
-    /// White (12), Gold (13), Silver (14) — boşluğu `0x00`, diğerlerinde
-    /// `0xFF` ile doldurur.
+    /// libcups fills the blank with `0x00` in spaces that ADD toner/ink —
+    /// K (3), CMY (4), CMYK (5), White (12), Gold (13), Silver (14) — and with
+    /// `0xFF` in the others.
     // Only the CUPS Raster line decoder needs this, and that lives behind
     // `golden-replay`.
     #[cfg_attr(not(feature = "golden-replay"), allow(dead_code))]
@@ -64,20 +63,20 @@ impl fmt::Display for CupsColorSpace {
             18 => "sGray (sRGB Grayscale)",
             19 => "sRGB",
             20 => "AdobeRGB",
-            other => return write!(f, "Bilinmeyen({})", other),
+            other => return write!(f, "Unknown({})", other),
         };
         write!(f, "{}", name)
     }
 }
 
-/// CUPS Renk Dizilimi (`cups_order_e`)
+/// CUPS colour order (`cups_order_e`)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CupsColorOrder {
-    /// Piksel baytları ardışık dizilir (Örn: RGBRGB... veya KKKK...)
+    /// Pixel bytes are laid out consecutively (e.g. RGBRGB... or KKKK...)
     Chunked,
-    /// Renk düzlemleri her satırda ayrı şeritler halindedir (RR... GG... BB...)
+    /// Colour planes are separate bands within each line (RR... GG... BB...)
     Banded,
-    /// Her renk düzlemi tüm sayfa boyunca ayrı bir sayfadır
+    /// Each colour plane is a separate page across the whole sheet
     Planar,
     Unknown(u32),
 }
@@ -146,59 +145,59 @@ impl PageGeometry {
     }
 }
 
-/// Güvenilmez bir dizeyi, log satırına gömülmeye hazır hâle getirir.
+/// Prepares an untrusted string for embedding in a log line.
 ///
-/// `{:?}` (Debug) biçimi dizeyi tırnak içine alır ve kontrol karakterlerini
-/// kaçırır (`\n`, `\u{1b}` gibi). Bu, iki saldırıyı birden kapatır:
-/// gömülü bir CR/LF ile `/var/log/cups/error_log`'a sahte bir günlük satırı
-/// enjekte etmek, ve gömülü ANSI/OSC dizileriyle logu izleyen yöneticinin
-/// terminalini (renk, pencere başlığı) manipüle etmek.
+/// The `{:?}` (Debug) format wraps the string in quotes and escapes control
+/// characters (like `\n`, `\u{1b}`). This closes two attacks at once:
+/// injecting a fake log line into `/var/log/cups/error_log` with an embedded
+/// CR/LF, and manipulating the terminal (colour, window title) of an admin
+/// watching the log with embedded ANSI/OSC sequences.
 ///
-/// Bu, `main`'in argv'den gelen `title`/`user` alanları için zaten uyguladığı
-/// kalıbın aynısıdır; buradaki yardımcı, aynı politikayı raster başlığından
-/// gelen dizeler ve dosya yolları için de tek bir yerde toplar.
+/// This is the same pattern `main` already applies to the `title`/`user`
+/// fields from argv; this helper collects the same policy in one place for the
+/// strings and file paths coming from the raster header.
 pub fn quote_untrusted(value: &str) -> String {
     format!("{:?}", value)
 }
 
-/// Sayfa başlığı alanlarının makul sınırlar içinde olduğunu doğrular.
+/// Validates that the page-header fields are within sensible bounds.
 ///
-/// Bozuk ya da kötü niyetli bir CUPS Raster akışı aşırı büyük `bytesPerLine`,
-/// yükseklik veya çözünürlük değerleri bildirebilir; bu değerler doğrudan
-/// tampon boyutu hesaplarında kullanıldığından, doğrulanmadan geçirilmeleri
-/// devasa/aşırı bellek tahsisine (OOM) ya da sessizce taşan hesaplamalara yol
-/// açabilir. Bu sınırlar gerçekçi yazıcı donanımının çok üzerinde, sadece
-/// açıkça saçma değerleri elemek için var.
-/// PPD'deki en yüksek `*Resolution` seçeneği (1200 DPI).
+/// A corrupt or malicious CUPS Raster stream can report enormous
+/// `bytesPerLine`, height or resolution values; since these are used directly
+/// in buffer-size calculations, letting them through unvalidated could cause a
+/// huge/excessive memory allocation (OOM) or a silently overflowing
+/// computation. These bounds are far above realistic printer hardware; they
+/// exist only to weed out plainly absurd values.
+/// The highest `*Resolution` option in the PPD (1200 DPI).
 pub const MAX_DPI: u32 = 1200;
-/// En büyük `*PaperDimension` (Legal: 1008 pt) + makul pay.
+/// The largest `*PaperDimension` (Legal: 1008 pt) + a sensible margin.
 pub const MAX_POINTS: u32 = 1300;
-/// ~1300 pt * 1200 dpi / 72 / 8 ≈ 2709 B (1-bit); yuvarlanıp pay bırakıldı.
+/// ~1300 pt * 1200 dpi / 72 / 8 ≈ 2709 B (1-bit); rounded up with slack.
 pub const MAX_BYTES_PER_LINE: u32 = 4096;
-/// ~1300 pt * 1200 dpi / 72 ≈ 21.667 satır; yuvarlanıp pay bırakıldı.
+/// ~1300 pt * 1200 dpi / 72 ≈ 21,667 lines; rounded up with slack.
 pub const MAX_LINES: u32 = 24_000;
 
-/// Fiziksel sayfa genişliğinin üzerinde kabul edilen yuvarlama payı.
-/// Gerekçe için `validate_page_header` içindeki D-01 açıklamasına bakın.
+/// The rounding slack allowed above the physical page width.
+/// See the D-01 explanation in `validate_page_header` for the rationale.
 pub const LINE_OVERSHOOT_SLACK_BYTES: u32 = 1;
 
-/// Fiziksel sayfa yüksekliğinin üzerinde kabul edilen yuvarlama payı.
-/// Gerekçe için `validate_page_header` içindeki D-02 açıklamasına bakın.
+/// The rounding slack allowed above the physical page height.
+/// See the D-02 explanation in `validate_page_header` for the rationale.
 pub const HEIGHT_OVERSHOOT_SLACK_LINES: u32 = 8;
 
 pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
-    // Sınırlar keyfi değil: ppd/samsung-ml2160.ppd'nin tanımladığı en yüksek
-    // çözünürlükten ve en büyük kağıttan türetildi, makul bir pay bırakıldı.
-    // Eski sınırlar (1.000.000 bayt/satır, 10.000 DPI, 100.000 pt) bu
-    // donanımın fiziksel olarak üretebileceğinin ~100 katı üzerindeydi;
-    // bozuk/kötü niyetli bir başlık bu boşluğu kullanıp devasa bant tamponları
-    // (bkz. stream_page_bands) tahsis ettirebilirdi.
+    // The bounds are not arbitrary: they are derived from the highest
+    // resolution and the largest paper that ppd/samsung-ml2160.ppd defines,
+    // with a sensible margin left. The old bounds (1,000,000 bytes/line,
+    // 10,000 DPI, 100,000 pt) were ~100x above what this hardware can
+    // physically produce; a corrupt/malicious header could use that slack to
+    // make it allocate enormous band buffers (see stream_page_bands).
     //
-    // PPD ile bu sabitler arasındaki bağ artık bir yorum değil, bir test:
-    // `test_limits_cover_every_ppd_option` PPD'yi ayrıştırıp her `*Resolution`
-    // ve `*PaperDimension` seçeneğinin sınırlar içinde kaldığını doğruluyor.
-    // PPD'ye daha büyük bir kağıt ya da daha yüksek çözünürlük eklenirse test
-    // kırılır ve sabitlerin birlikte güncellenmesi gerektiğini söyler.
+    // The link between the PPD and these constants is no longer a comment but a
+    // test: `test_limits_cover_every_ppd_option` parses the PPD and verifies
+    // that every `*Resolution` and `*PaperDimension` option stays within the
+    // bounds. If a larger paper or higher resolution is added to the PPD the
+    // test breaks and says the constants must be updated with it.
     let invalid = |msg: String| Err(io::Error::new(io::ErrorKind::InvalidData, msg));
 
     if header.bytes_per_line == 0 || header.bytes_per_line > MAX_BYTES_PER_LINE {
@@ -241,20 +240,12 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
         ));
     }
 
-    // D-07: `Margins[0]` da bir geometri alanıdır ve doğrulanmalıdır.
+    // D-07: `Margins[0]` is a geometry field too, and must be validated.
     //
-    // Bu alan `hard_margin_bytes` üzerinden yatay yerleşimi belirler (bkz.
-    // `band_placement`), ama bugüne kadar hiç denetlenmiyordu. Doğrulanmadan
-    // geçen bir değerin iki başarısızlık kipi var: (1) devasa bir kenar
-    // boşluğu (ör. 300.000.000 pt) `hard_margin_bytes` içindeki `px + 7`
-    // toplamasını taşırır — `overflow-checks` açık yapılarda iş ortasında
-    // panik, sürüm yapılarında sessizce 0'a sarma, yani kenar boşluğu
-    // düzeltmesinin hiç uygulanmaması; (2) sayfadan geniş bir sol kenar
-    // boşluğu fiziksel olarak anlamsızdır ve satırın tamamının atlanmasına
-    // (boş sayfa) yol açar. Sol kenar boşluğu sayfanın kendisinden dar
-    // olmalıdır; PPD'nin bütün `*ImageableArea` girdilerinde bu değer 12 pt'dir.
-    // Sayfa genişliği yukarıda `MAX_POINTS` ile sınırlandığı için bu kontrol
-    // aynı zamanda taşmayı da kapatır.
+    // Reject a physically impossible integer header margin. Historically this
+    // field also drove band placement and could overflow the pixel calculation.
+    // Placement now uses the separate 12.5 pt driver constant, preserving the
+    // fractional point that the integer CUPS field cannot represent.
     if header.margins[0] >= header.page_size_points[0] {
         return invalid(format!(
             "invalid left margin: {} pt; it must be smaller than the page width ({} pt)",
@@ -262,14 +253,13 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
         ));
     }
 
-    // ML-2160 serisi QPDL motoru tek düzlemli, 1-bit monokrom (K) raster
-    // bekler: stream_page_bands her baytı doğrudan tek bir siyah/beyaz
-    // düzlem olarak yorumlayıp koşulsuz tersliyor (bkz. o fonksiyondaki
-    // polarite açıklaması). Bu varsayımla uyuşmayan bir akış (ör. 24-bit RGB
-    // ya da 32-bit CMYK) sessizce 1-bit monokrom sanılıp yazıcıya
-    // gönderilirse şerit hizalaması bozulur, firmware senkronizasyonu
-    // kaybolur ve gereksiz toner tüketimine yol açar; bu yüzden erken
-    // reddediyoruz.
+    // The ML-2160 series QPDL engine expects single-plane, 1-bit monochrome
+    // (K) raster: stream_page_bands interprets each byte directly as a single
+    // black/white plane and inverts it unconditionally (see the polarity
+    // explanation in that function). A stream that does not match this
+    // assumption (e.g. 24-bit RGB or 32-bit CMYK), if silently mistaken for
+    // 1-bit monochrome and sent to the printer, breaks band alignment, loses
+    // firmware sync and wastes toner; so we reject it early.
     if header.color_space != CupsColorSpace::K {
         return invalid(format!(
             "unsupported colour space: {} (only 1-bit K/monochrome is supported)",
@@ -290,11 +280,11 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
         ));
     }
 
-    // `cupsColorOrder` bugüne kadar hiç denetlenmiyordu. 1-bit tek kanallı
-    // veride Chunked/Banded/Planar dizilimleri BİRBİRİNİN AYNIsıdır (tek
-    // düzlem, tek kanal), bu yüzden üçü de kabul edilir; ama tanınmayan bir
-    // değer, akışı üreten tarafın bu filtrenin varsaydığından farklı bir
-    // düzen kullandığının işaretidir ve sessizce yanlış yorumlanmamalıdır.
+    // `cupsColorOrder` was never checked until now. For 1-bit single-channel
+    // data the Chunked/Banded/Planar layouts are ALL IDENTICAL (one plane, one
+    // channel), so all three are accepted; but an unrecognised value is a sign
+    // that the producer uses a layout different from what this filter assumes,
+    // and must not be silently misinterpreted.
     if let CupsColorOrder::Unknown(order) = header.color_order {
         return invalid(format!(
             "unrecognised cupsColorOrder value: {} (expected: 0=Chunked, 1=Banded, 2=Planar)",
@@ -302,20 +292,19 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
         ));
     }
 
-    // D-01: `cupsBytesPerLine`, sayfanın FİZİKSEL genişliğine sığmalı.
+    // D-01: `cupsBytesPerLine` must fit the PHYSICAL width of the page.
     //
-    // Bant genişliği `page_size_points` ve `hw_resolution`'dan hesaplanır
-    // (bkz. compute_page_width_pixels); satır bundan genişse fazlalık
-    // sessizce kırpılıyordu. Yukarıdaki `cupsWidth` tutarlılık kontrolü bunu
-    // yakalamaz, çünkü kendi içinde tutarlı ama sayfayla tutarsız bir başlık
-    // (ör. `PageSize = 1 pt` + `cupsBytesPerLine = 620`) bantı 1 bayta
-    // düşürüp satırların %99,8'ini attırabiliyordu.
+    // The band width is computed from `page_size_points` and `hw_resolution`
+    // (see compute_page_width_pixels); if the line is wider than that, the
+    // excess used to be silently clipped. The `cupsWidth` consistency check
+    // above does not catch it, because a header that is self-consistent but
+    // inconsistent with the page (e.g. `PageSize = 1 pt` + `cupsBytesPerLine =
+    // 620`) could shrink the band to 1 byte and drop 99.8% of each line.
     //
-    // Payın 1 bayt olmasının nedeni: `page_width_pixels` yukarı doğru 8'e
-    // hizalandığı için normalde `bytes_per_line <= band_width_bytes` zaten
-    // sağlanır; 1 baytlık pay yalnızca üretici tarafın farklı yuvarlaması
-    // ihtimalini karşılar. Bu payın içinde kalan sapma, aşağıdaki sayfa
-    // döngüsünde uyarıyla birlikte kırpılmaya devam eder.
+    // The slack is 1 byte because `page_width_pixels` is aligned up to 8, so
+    // `bytes_per_line <= band_width_bytes` normally holds already; the 1-byte
+    // slack only covers the producer rounding differently. A deviation within
+    // that slack continues to be clipped, with a warning, in the page loop below.
     let band_width_bytes =
         compute_page_width_pixels(header.page_size_points[0], header.hw_resolution[0]).div_ceil(8);
     if header.bytes_per_line > band_width_bytes + LINE_OVERSHOOT_SLACK_BYTES {
@@ -328,27 +317,25 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
         ));
     }
 
-    // D-02: `cupsHeight`, sayfanın FİZİKSEL yüksekliğine sığmalı.
+    // D-02: `cupsHeight` must fit the PHYSICAL height of the page.
     //
-    // D-01'in dikey karşılığı. Yükseklik bugüne kadar yalnızca global
-    // `MAX_LINES` sınırına karşı denetleniyordu; sayfanın kendi boyutuyla hiç
-    // karşılaştırılmıyordu. Kendi içinde tutarlı ama sayfayla tutarsız bir
-    // başlık (ör. `PageSize = 595 x 1 pt` + `cupsHeight = 24000`) böylece
-    // kabul ediliyor, QPDL sayfa başlığına 24000 satırlık bir yükseklik
-    // yazılıyor ve sayfaya sığandan 3-4 kat fazla bant gönderiliyordu.
-    // Yazıcıya bildirilen boyut ile gerçekte gönderilen veri miktarının
-    // ayrışması, D-01'de olduğu gibi yazıcı tarafında hizalama/senkron kaybı
-    // ve gereksiz kâğıt/toner tüketimi anlamına gelir.
+    // The vertical counterpart of D-01. Height used to be checked only against
+    // the global `MAX_LINES` limit; it was never compared with the page's own
+    // size. A header that is self-consistent but inconsistent with the page
+    // (e.g. `PageSize = 595 x 1 pt` + `cupsHeight = 24000`) was thus accepted,
+    // a height of 24000 lines written into the QPDL page header, and 3-4x more
+    // bands sent than fit on the page. The size reported to the printer
+    // diverging from the data actually sent means, as in D-01, alignment/sync
+    // loss on the printer side and wasted paper/toner.
     //
-    // Payın 8 satır olmasının nedeni: genişlikten farklı olarak burada 8'e
-    // hizalama YOK, yani `compute_page_height_lines` fazladan bir baş boşluk
-    // bırakmıyor; pay yalnızca üretici tarafın farklı yuvarlaması (ceil yerine
-    // round, ya da küçük bir bloğa hizalama) ihtimalini karşılıyor. Gerçek
-    // cups-filters çıktısı bu sınırın çok altında kalır, çünkü PPD'nin
-    // `*ImageableArea` kenar boşluklarını düşer: A4 @600 DPI'da fiziksel
-    // 7017 satıra karşılık bu sistemde ölçülen `cupsHeight` 6817'dir (12 pt
-    // üst + 12 pt alt yaklaşık 200 satır eksiltir). Yani meşru hiçbir iş bu
-    // kontrole takılmaz.
+    // The slack is 8 lines because, unlike the width, there is NO alignment to
+    // 8 here, so `compute_page_height_lines` leaves no extra headroom; the
+    // slack only covers the producer rounding differently (round instead of
+    // ceil, or aligning to a small block). Real cups-filters output stays far
+    // below this bound, because it subtracts the PPD's `*ImageableArea`
+    // margins: at A4 @600 DPI, against a physical 7017 lines the `cupsHeight`
+    // measured on this system is 6817 (a 12 pt top + 12 pt bottom removes about
+    // 200 lines). So no legitimate job hits this check.
     let page_height_lines =
         compute_page_height_lines(header.page_size_points[1], header.hw_resolution[1]);
     if header.height > page_height_lines + HEIGHT_OVERSHOOT_SLACK_LINES {
@@ -361,35 +348,35 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
     Ok(())
 }
 
-/// SpliX document.cpp'deki `pageWidth` hesaplamasının Rust karşılığı.
+/// The Rust counterpart of the `pageWidth` computation in SpliX document.cpp.
 ///
-/// SpliX kaynak kodu:
+/// SpliX source:
 ///   pageWidth = ((unsigned long)ceil(convertToXResolution(
 ///       request.printer()->pageWidth())) + 7) & ~7;
 ///
-/// page_size_pt: Sayfa genişliği (1/72 inç, CUPS header.PageSize[0])
-/// x_dpi: Yatay çözünürlük (CUPS header.HWResolution[0])
+/// page_size_pt: page width (1/72 inch, CUPS header.PageSize[0])
+/// x_dpi: horizontal resolution (CUPS header.HWResolution[0])
 pub fn compute_page_width_pixels(page_size_pt: u32, x_dpi: u32) -> u32 {
     let px = (page_size_pt as f64 * x_dpi as f64 / 72.0).ceil() as u32;
     (px + 7) & !7u32
 }
 
-/// Sayfanın fiziksel yüksekliğinin kaç raster satırına karşılık geldiği.
+/// How many raster lines the physical height of the page corresponds to.
 ///
-/// `compute_page_width_pixels`'in dikey karşılığı, iki farkla: dikey eksende
-/// bant/DMA hizalaması gerekmediği için 8'e yuvarlama YOKTUR, ve dikey
-/// çözünürlük `hw_resolution[1]`'dir — PPD `1200x600dpi` gibi asimetrik bir
-/// seçenek sunduğu için bu ayrım gerçekten tetiklenebilir.
+/// The vertical counterpart of `compute_page_width_pixels`, with two
+/// differences: on the vertical axis there is NO rounding to 8, because no
+/// band/DMA alignment is needed there, and the resolution is
+/// `hw_resolution[1]` — a distinction that really can be triggered, because the
+/// PPD offers an asymmetric option like `1200x600dpi`.
 ///
-/// Yalnızca `validate_page_header`'ın D-02 kontrolünde bir ÜST SINIR olarak
-/// kullanılır; sayfa döngüsü satır sayısını (D-01'deki genişlik gibi) buna
-/// göre yeniden ölçeklemez, çünkü gönderilecek satır sayısı `cupsHeight`
-/// tarafından belirlenir.
+/// Used only as an UPPER BOUND in `validate_page_header`'s D-02 check; the page
+/// loop does not rescale the line count to it (as the width does in D-01),
+/// because the number of lines to send is determined by `cupsHeight`.
 pub fn compute_page_height_lines(page_size_pt: u32, y_dpi: u32) -> u32 {
     (page_size_pt as f64 * y_dpi as f64 / 72.0).ceil() as u32
 }
 
-/// Yazıcının SERT KENAR BOŞLUĞUNU (hard margin) bant tamponu baytına çevirir.
+/// Converts the printer's HARD MARGIN into a band-buffer byte offset.
 ///
 /// SpliX compress.cpp `_compressBandedPage`:
 ///
@@ -435,44 +422,44 @@ pub fn hard_margin_lines(margin_pt: f64, y_dpi: u32) -> u32 {
     (margin_pt * y_dpi as f64 / 72.0).round() as u32
 }
 
-/// CUPS satırının bant tamponundaki yatay yerleşimi.
+/// The horizontal placement of a CUPS line within the band buffer.
 ///
-/// İki alan birlikte tek bir işaretli ofseti temsil eder: `dst_offset`
-/// pozitif kaydırma, `src_skip` ise negatif kaydırmadır (satırın solundan
-/// atılan baytlar). İkisi aynı anda sıfırdan büyük olamaz.
+/// The two fields together represent a single signed offset: `dst_offset` is a
+/// positive shift, `src_skip` a negative one (bytes dropped from the left of
+/// the line). Both cannot be greater than zero at once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BandPlacement {
-    /// İçeriğin bant tamponunda başladığı sütun (bayt).
+    /// The column (byte) where the content starts in the band buffer.
     pub dst_offset: usize,
-    /// CUPS satırının başından atlanacak bayt sayısı.
+    /// The number of bytes to skip from the start of the CUPS line.
     pub src_skip: usize,
 }
 
-/// CUPS satırının bant tamponundaki yatay konumunu SpliX ile aynı şekilde
-/// hesaplar.
+/// Computes the horizontal position of a CUPS line within the band buffer the
+/// same way SpliX does.
 ///
-/// D-06 regresyonu. Burada eskiden yalnızca ORTALAMA vardı
-/// (`(bandWidthInB - lineSize) / 2`) ve sert kenar boşluğu hiç düşülmüyordu;
-/// oysa SpliX iki adımı da uygular:
+/// D-06 regression. This used to apply only CENTRING
+/// (`(bandWidthInB - lineSize) / 2`) and never subtract the hard margin; but
+/// SpliX applies both steps:
 ///
 /// ```c
-/// // document.cpp:120 — satırı sayfa genişliğinde ortala
+/// // document.cpp:120 — centre the line within the page width
 /// marginWidthInB = (pageWidthInB - lineSize) / 2;
-/// // compress.cpp:227 — bandı doldururken sert kenar boşluğunu ATLA
+/// // compress.cpp:227 — SKIP the hard margin while filling the band
 /// band[x * bandHeight + y] = planes[i][index + x + hardMarginXInB + ...];
 /// ```
 ///
-/// Net ofset `ortalama - hardMarginXInB`'dir. A4 @600 DPI'da ortalama
-/// `(620 - 595) / 2 = 12` bayt, sert kenar boşluğu 13 bayttır; yani içerik
-/// bandın 0. sütunundan başlar. Yalnızca ortalama uygulandığında içerik 12
-/// bayt (96 piksel ≈ 11,5 pt ≈ 4 mm) sağa kayıyordu ve sağ kenarı basılabilir
-/// alanın dışına taşıyordu.
+/// The net offset is `centring - hardMarginXInB`. At A4 @600 DPI the centring
+/// is `(620 - 595) / 2 = 12` bytes and the hard margin 13 bytes, so the
+/// content starts at column 0 of the band. With centring alone the content
+/// shifted 12 bytes (96 pixels ≈ 11.5 pt ≈ 4 mm) to the right and ran its
+/// right edge past the printable area.
 ///
-/// Bu, dikey eksenle de tutarlılık sağlar: dikeyde hiçbir zaman kaydırma
-/// yapılmadı (sayfa döngüsü ilk satırı bandın 0. satırına yazar) ve SpliX'in
-/// dikey neti de sıfırdır — ortalama `(7017 - 6817) / 2 = 100` satır, sert
-/// kenar boşluğu `hardMarginY = 100` satır. İki eksenin farklı origin
-/// varsayması hatanın kendisiydi.
+/// This also keeps consistency with the vertical axis: vertically there was
+/// never any shift (the page loop writes the first line to band line 0) and
+/// SpliX's vertical net is zero too — centring `(7017 - 6817) / 2 = 100` lines,
+/// hard margin `hardMarginY = 100` lines. The two axes assuming a different
+/// origin was the bug itself.
 pub fn band_placement(
     band_width_bytes: usize,
     cups_line_bytes: usize,
@@ -481,14 +468,14 @@ pub fn band_placement(
     let centered = band_width_bytes.saturating_sub(cups_line_bytes) / 2;
     let src_skip = hard_margin_bytes.saturating_sub(centered);
 
-    // Satırın tamamının atlanması reddedilir. Burada eskiden bir kırpma vardı
-    // (`.min(cups_line_bytes - 1)`) ve gerekçesi "boş bir sayfa üretilmesin"
-    // diye yazılmıştı; oysa boş sayfayı üreten şeyin kendisi kırpmaydı: geriye
-    // kalan tek bayt, satırdaki rastgele bir sütuna düşüyor ve sayfanın geri
-    // kalanı sessizce kayboluyordu. Sert kenar boşluğunun satır genişliğini
-    // aşması fiziksel olarak tutarsız bir geometridir; dosyanın geri kalanı
-    // (bkz. D-01/D-02) böyle bir geometriyi sessizce düzeltmek yerine
-    // reddettiği için burada da reddediyoruz.
+    // Skipping the whole line is rejected. There used to be a clamp here
+    // (`.min(cups_line_bytes - 1)`) whose stated reason was "do not produce a
+    // blank page"; but the clamp itself was what produced the blank page: the
+    // single remaining byte landed in an arbitrary column of the line and the
+    // rest of the page was silently lost. A hard margin exceeding the line
+    // width is a physically inconsistent geometry; the rest of the file (see
+    // D-01/D-02) rejects such a geometry rather than silently correcting it, so
+    // we reject it here too.
     if src_skip >= cups_line_bytes {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -506,9 +493,10 @@ pub fn band_placement(
     })
 }
 
-/// CUPS Raster sayfa başlığındaki duplex bilgisini QPDL duplex moduna çevirir.
+/// Converts the duplex information in the CUPS Raster page header into a QPDL
+/// duplex mode.
 ///
-/// SpliX `request.cpp` bu kararı PPD üzerinden verir:
+/// SpliX `request.cpp` makes this decision through the PPD:
 ///
 /// ```c
 /// manualDuplex = ppd->get("ManualDuplex", "QPDL").isTrue();
@@ -517,29 +505,28 @@ pub fn band_placement(
 /// else _duplex = Simplex;
 /// ```
 ///
-/// PPD seçeneği (`DuplexNoTumble`/`DuplexTumble`) bize CUPS raster başlığındaki
-/// `Duplex` + `Tumble` çifti olarak ulaşır: `Duplex=false` -> Simplex,
-/// `Duplex=true, Tumble=false` -> uzun kenar, `Duplex=true, Tumble=true` ->
-/// kısa kenar.
+/// The PPD option (`DuplexNoTumble`/`DuplexTumble`) reaches us as the
+/// `Duplex` + `Tumble` pair in the CUPS raster header: `Duplex=false` ->
+/// Simplex, `Duplex=true, Tumble=false` -> long edge, `Duplex=true,
+/// Tumble=true` -> short edge.
 ///
-/// Bu projenin PPD'si de upstream SpliX'in kardeş model PPD'leri
-/// (`ml1910.ppd`, `ml2010.ppd`, `ml2525.ppd`) gibi
-/// `*QPDL ManualDuplex: "On"` bildiriyor ve ML-2160 serisinin
-/// otomatik dupleks donanımı yok; dolayısıyla `manualDuplex` bu ailede her
-/// zaman doğrudur ve sonuç daima `Manual*` varyantlarından biridir.
+/// This project's PPD, like upstream SpliX's sibling-model PPDs
+/// (`ml1910.ppd`, `ml2010.ppd`, `ml2525.ppd`), declares
+/// `*QPDL ManualDuplex: "On"`, and the ML-2160 series has no automatic-duplex
+/// hardware; so `manualDuplex` is always true in this family and the result is
+/// always one of the `Manual*` variants.
 ///
-/// UYARI: bu yol ŞU AN ERİŞİLEMEZ. Projenin PPD'sinde `*OpenUI *Duplex` bloğu
-/// bulunmadığı için CUPS raster başlığındaki `Duplex` hiçbir zaman set
-/// edilmiyor. Eşleme yine de doğru tutuluyor ki PPD'ye duplex seçeneği
-/// eklendiğinde protokol tarafı hazır olsun. Eklenmeden önce bilinmesi gereken
-/// iki eksik için `stream_page_bands`'in altındaki nota bakın.
-/// ELLE DUPLEX EKSİĞİ (2/2): elle duplex, işin iki geçişte basılmasını
-/// gerektirir — önce bir yüz, sonra operatör kağıdı ters çevirip yeniden
-/// yükledikten sonra diğer yüz. Bu filtre sayfaları akıştan geldikleri sırayla
-/// tek geçişte gönderiyor; sayfa sırasını geçişlere bölmüyor. PPD'ye bir
-/// `*OpenUI *Duplex` bloğu eklenecekse bu akışın da (ve yukarıdaki 1/2
-/// maddesinin) çözülmesi gerekir, aksi hâlde çift taraflı işler yanlış sırada
-/// basılır.
+/// WARNING: this path is CURRENTLY UNREACHABLE. Because the project's PPD has
+/// no `*OpenUI *Duplex` block, the `Duplex` field in the CUPS raster header is
+/// never set. The mapping is kept correct anyway so the protocol side is ready
+/// when a duplex option is added to the PPD. For the two gaps to know about
+/// before it is added, see the note below `stream_page_bands`.
+/// MANUAL-DUPLEX GAP (2/2): manual duplex requires the job to be printed in
+/// two passes — one side first, then the other after the operator flips and
+/// reloads the paper. This filter sends pages in a single pass in the order
+/// they arrive in the stream; it does not split the page order into passes. If
+/// an `*OpenUI *Duplex` block is added to the PPD, this flow (and item 1/2
+/// above) must be resolved too, or duplex jobs print in the wrong order.
 pub fn duplex_mode(duplex: bool, tumble: bool) -> SplDuplex {
     if !duplex {
         SplDuplex::Simplex
@@ -550,18 +537,19 @@ pub fn duplex_mode(duplex: bool, tumble: bool) -> SplDuplex {
     }
 }
 
-/// CUPS Raster sayfa başlığındaki `MediaType` alanını yazıcının PJL
-/// `PAPERTYPE` değerine çevirir; tanınmayan her değer `OFF`'a düşer.
+/// Converts the `MediaType` field in the CUPS Raster page header into the
+/// printer's PJL `PAPERTYPE` value; every unrecognised value falls back to
+/// `OFF`.
 ///
-/// Bu alan PPD'nin `*MediaType` seçeneğinden gelir (`<</MediaType(ENV)>>
-/// setpagedevice` -> başlıkta `MediaType = "ENV"`) ve daha önce hiç
-/// okunmuyordu: filtre her işte koşulsuz `@PJL SET PAPERTYPE=OFF` yazıyor,
-/// yani zarf/etiket/kart stoğu seçen kullanıcı düz kağıt füzer ayarlarıyla
-/// baskı alıyordu.
+/// This field comes from the PPD's `*MediaType` option (`<</MediaType(ENV)>>
+/// setpagedevice` -> `MediaType = "ENV"` in the header) and used to be ignored
+/// entirely: the filter wrote `@PJL SET PAPERTYPE=OFF` unconditionally on
+/// every job, so a user selecting envelope/label/card stock printed with
+/// plain-paper fuser settings.
 ///
-/// Geri düşüş SESSİZ değil: PPD ile filtrenin kelime dağarcığı ayrışırsa
-/// (ör. eski, okunabilir adlar taşıyan bir PPD hâlâ kuruluysa) bu satır
-/// kullanıcının seçiminin yazıcıya ulaşmadığını söyler.
+/// The fallback is NOT silent: if the PPD's and the filter's vocabularies
+/// diverge (e.g. an old PPD carrying readable names is still installed), this
+/// line says that the user's choice did not reach the printer.
 pub fn pjl_paper_type_for(media_type: &str, log: &dyn Log) -> &'static str {
     if media_type.is_empty() {
         return qpdl::PJL_PAPERTYPE_DEFAULT;
@@ -569,9 +557,9 @@ pub fn pjl_paper_type_for(media_type: &str, log: &dyn Log) -> &'static str {
     match qpdl::pjl_paper_type(media_type) {
         Some(paper_type) => paper_type,
         None => {
-            // `MediaType` 64 baytlık serbest bir C dizesidir ve işi gönderen
-            // istemciden gelir; argv'deki `title`/`user` kadar güvenilmez,
-            // bu yüzden kaçırılmış olarak basılır.
+            // `MediaType` is a free 64-byte C string coming from the client
+            // that submitted the job; it is as untrusted as `title`/`user` in
+            // argv, so it is printed escaped.
             log.log(
                 Level::Warning,
                 &format!(
@@ -588,17 +576,18 @@ pub fn pjl_paper_type_for(media_type: &str, log: &dyn Log) -> &'static str {
     }
 }
 
-/// QPDL şerit (band) yüksekliğinin temel değeri, satır cinsinden.
+/// The base value of the QPDL band height, in lines.
 ///
-/// SpliX bunu PPD'den okur (`*QPDL BandSize: "128"`); hem upstream SpliX'in
-/// kardeş model PPD'leri (`ml1910.ppd`, `ml2010.ppd`, `ml2525.ppd`,
-/// `ml1640.ppd`, `ml2510.ppd`) hem de bu projenin PPD'si 128 diyor.
+/// SpliX reads this from the PPD (`*QPDL BandSize: "128"`); both upstream
+/// SpliX's sibling-model PPDs (`ml1910.ppd`, `ml2010.ppd`, `ml2525.ppd`,
+/// `ml1640.ppd`, `ml2510.ppd`) and this project's PPD say 128.
 pub const QPDL_BAND_HEIGHT: usize = 128;
 
-/// Bir sayfa için kullanılacak şerit yüksekliği.
+/// The band height to use for a page.
 ///
-/// SpliX `compress.cpp` `_compressBandedPage` (Algo 0x11 bu yola gider; bkz.
-/// aynı dosyadaki `compressPage` dağıtıcısı, 0x0D/0x0E/0x11 -> banded):
+/// SpliX `compress.cpp` `_compressBandedPage` (Algo 0x11 goes down this path;
+/// see the `compressPage` dispatcher in the same file, 0x0D/0x0E/0x11 ->
+/// banded):
 ///
 /// ```c
 /// bandHeight = request.printer()->bandHeight();   // PPD: *QPDL BandSize
@@ -606,15 +595,16 @@ pub const QPDL_BAND_HEIGHT: usize = 128;
 ///     bandHeight /= 2;
 /// ```
 ///
-/// Yani 300x300 DPI'da şerit yüksekliği 128 değil 64'tür. Kural koşulsuzdur ve
-/// üç yeri birden etkiler: bant tamponunun boyutu (`bandWidthInB * bandHeight`),
-/// transpoze indeksleme (`band[x * bandHeight + y]`) ve şerit kaydına yazılan
-/// yükseklik alanı. Bu filtre daha önce her çözünürlükte 128 kullanıyordu;
-/// PPD'nin `300dpi` seçeneği seçildiğinde yazıcıya 64 satırlık şeritler
-/// beklerken 128'e göre transpoze edilmiş veri gönderiliyordu.
+/// So at 300x300 DPI the band height is 64, not 128. The rule is
+/// unconditional and affects three places at once: the size of the band buffer
+/// (`bandWidthInB * bandHeight`), the transposed indexing
+/// (`band[x * bandHeight + y]`) and the height field written into the band
+/// record. This filter used to use 128 at every resolution; when the PPD's
+/// `300dpi` option was selected, the printer expected 64-line bands but was
+/// sent data transposed for 128.
 ///
-/// Not: asimetrik `1200x600dpi` modu bu kuralın DIŞINDA kalır — koşul iki
-/// eksenin de 300 olmasını istiyor — ve 128'de kalmaya devam eder.
+/// Note: the asymmetric `1200x600dpi` mode falls OUTSIDE this rule — the
+/// condition requires both axes to be 300 — and stays at 128.
 pub fn band_height_for(hw_resolution: [u32; 2]) -> usize {
     if hw_resolution[0] == 300 && hw_resolution[1] == 300 {
         QPDL_BAND_HEIGHT / 2
@@ -637,7 +627,7 @@ pub fn band_height_for(hw_resolution: [u32; 2]) -> usize {
 ///   lines, or 85 bands.
 ///
 /// Both are inside the field with room to spare; the worst case reachable
-/// from the PPD itself is Legal at 1200x1200, 129 bands
+/// from the current 12.5 pt PPD is Legal at 1200x1200, 128 bands
 /// (`test_band_count_stays_inside_the_qpdl_band_order_field`). If the paper
 /// table, the resolution list or `QPDL_BAND_HEIGHT` ever change enough to
 /// break that, this fails at compile time instead of on paper.
@@ -656,77 +646,74 @@ const _: () = {
     assert!(div_ceil(lines_at_300_dpi, QPDL_BAND_HEIGHT / 2) <= CEILING);
 };
 
-/// Tek bir baskı işinde işlenecek azami sayfa sayısı.
+/// The maximum number of pages processed in a single print job.
 ///
-/// Sayfa döngüsünün üst sınırı yoktu: akış ne kadar uzunsa o kadar sayfa
-/// üretiliyordu. Bu hem doğrudan kâğıt/toner tüketimini sınırsız bırakıyor
-/// (`MAX_REALISTIC_COPIES` ile çarpıldığında daha da fazlası), hem de
-/// sıkıştırıcının sayfa başına maliyetini toplamda sınırsız kılıyordu. Filtre
-/// CUPS kuyruğunu tek iş parçacığıyla işlediği için uzun bir iş sıradaki tüm
-/// işleri bekletir.
+/// The page loop had no upper bound: the longer the stream, the more pages
+/// were produced. This left paper/toner consumption unbounded (even more so
+/// multiplied by `MAX_REALISTIC_COPIES`), and made the compressor's per-page
+/// cost unbounded in total. Because the filter processes the CUPS queue with a
+/// single thread, a long job holds up every job behind it.
 ///
-/// Sınır 5.000'den 1.000'e ÇEKİLDİ. Gerekçe, hedef donanımın kendisi: ML-2160
-/// serisi ~20 sayfa/dakika basar, yani 1.000 sayfalık bir iş yazıcıyı zaten
-/// ~50 dakika meşgul eder ve iki top kâğıt tüketir. 5.000 sayfa (~4 saat kesintisiz
-/// baskı) bu sınıf bir kişisel yazıcıda gerçek bir belge değil, yalnızca
-/// kötüye kullanım senaryosunun tavanıydı. Sınırı düşürmek, filtrenin en kötü
-/// durumdaki CPU maliyetini de aynı oranda düşürür (bkz.
-/// `MAX_JOB_RASTER_BYTES`).
+/// The limit was LOWERED from 5,000 to 1,000. The rationale is the target
+/// hardware itself: the ML-2160 series prints ~20 pages/minute, so a
+/// 1,000-page job already keeps the printer busy ~50 minutes and consumes two
+/// reams. 5,000 pages (~4 hours of continuous printing) is not a real document
+/// on a personal printer of this class, only the ceiling of an abuse scenario.
+/// Lowering the limit lowers the filter's worst-case CPU cost by the same
+/// proportion (see `MAX_JOB_RASTER_BYTES`).
 pub const MAX_PAGES_PER_JOB: u32 = 1_000;
 
-/// Tek bir baskı işinde işlenebilecek azami HAM RASTER hacmi (bayt).
+/// The maximum RAW RASTER volume (bytes) processed in a single print job.
 ///
-/// `MAX_PAGES_PER_JOB` tek başına yetersiz, çünkü ÇÖZÜNÜRLÜK KÖRÜdür: bir
-/// sayfanın işlenme maliyeti sayfa sayısıyla değil, bayt sayısıyla ölçeklenir.
-/// Ölçülen değerler (bu makinede, release derlemesi, 346.752 baytlık gerçek
-/// bant boyutunda):
+/// `MAX_PAGES_PER_JOB` alone is insufficient, because it is RESOLUTION-BLIND:
+/// the cost of processing a page scales with byte count, not page count.
+/// Measured values (on this machine, a release build, at a real band size of
+/// 346,752 bytes):
 ///
-/// * sıkıştırılabilir (sıfır dolu) bant: ~166 MB/s
-/// * SIKIŞTIRILAMAZ gürültü: ~6,65 MB/s
+/// * compressible (zero-filled) band: ~166 MB/s
+/// * INCOMPRESSIBLE noise: ~6.65 MB/s
 ///
-/// Aradaki ~25 katlık fark, bayt cinsinden bir bütçenin CPU süresini ancak
-/// kaba biçimde sınırlayabildiği anlamına gelir; bu yüzden bütçe, en kötü
-/// durum kabul edilebilir kalacak şekilde seçilmelidir.
+/// The ~25x gap between them means a byte budget can only crudely bound CPU
+/// time; so the budget must be chosen so the worst case stays acceptable.
 ///
-/// GİRDİ BOYUTUNDAN BAĞIMSIZLIK: bu bütçe ÇÖZÜLMÜŞ raster hacmini sayar,
-/// girdi hacmini değil. CUPS Raster v2'nin satır-RLE'siyle, doğrulayıcının
-/// kabul ettiği en büyük geometride (Legal @1200 DPI, yuvarlama paylarıyla
-/// 1276 B/satır x 16.808 satır) yaklaşık 11.100 kat genişleme mümkündür.
-/// Yaklaşık 0,74 MiB'lik tamamen beyaz bir akış bile 8 GiB'tan fazla raster
-/// işi doğurabilir; tek gerçek savunma çözülen verinin tavanını doğrudan
-/// sınırlamaktır.
+/// INDEPENDENCE FROM INPUT SIZE: this budget counts the DECODED raster volume,
+/// not the input volume. With CUPS Raster v2's line-RLE, at the largest
+/// geometry the validator accepts (Legal @1200 DPI, 1276 B/line x 16,808 lines
+/// with the rounding slack), an expansion of about 11,100x is possible. Even a
+/// fully white stream of about 0.74 MiB can spawn more than 8 GiB of raster
+/// work; the only real defence is to bound the decoded data directly.
 ///
-/// 8 GiB, iki sınırın da anlamlı kalacağı şekilde seçildi:
+/// 8 GiB was chosen so both limits stay meaningful:
 ///
-/// * @600 DPI'da ölçülen A4 sayfa 595 x 6817 = ~3,87 MiB'dir;
-///   `MAX_PAGES_PER_JOB` kadarı (1.000 sayfa) ~3,78 GiB eder, yani bütçenin
-///   yarısının altında kalır. Sayfa sınırına kadar olan hiçbir normal
-///   çözünürlüklü iş bu kontrole TAKILMAZ.
-/// * En büyük kabul edilebilir sayfada (~20,45 MiB) bütçe 401. sayfada
-///   devreye girer ve ölçülen en kötü sıkıştırma hızında işi yaklaşık 22
-///   dakikayla sınırlar.
+/// * the A4 page measured @600 DPI is 595 x 6817 = ~3.87 MiB;
+///   `MAX_PAGES_PER_JOB` of them (1,000 pages) is ~3.78 GiB, i.e. under half
+///   the budget. No normal-resolution job up to the page limit HITS this
+///   check.
+/// * at the largest acceptable page (~20.45 MiB) the budget engages at page
+///   401 and, at the measured worst-case compression speed, bounds the job to
+///   about 22 minutes.
 pub const MAX_JOB_RASTER_BYTES: u64 = 8 * 1024 * 1024 * 1024;
 
-/// Tek bir baskı işinin üretebileceği azami YAPRAK sayısı (sayfa x kopya).
+/// The maximum number of SHEETS (pages x copies) a single print job can produce.
 ///
-/// `MAX_PAGES_PER_JOB` ve `MAX_REALISTIC_COPIES` ayrı ayrı gerekçelendirilmişti
-/// ama ÇARPIMLARI hiçbir yerde sınırlanmıyordu: eski değerlerle tek bir iş
-/// 5.000 x 999 = 4.995.000 yaprak basma komutu üretebiliyordu. `num_copies`
-/// sayfa başlığından, yani güvenilmez taraftan geldiği için kâğıt/toner
-/// tüketimi açısından anlamlı olan tek sınır budur — sayfa sayısı değil,
-/// yaprak sayısı.
+/// `MAX_PAGES_PER_JOB` and `MAX_REALISTIC_COPIES` were each justified
+/// separately, but their PRODUCT was bounded nowhere: with the old values a
+/// single job could produce 5,000 x 999 = 4,995,000 sheet-print commands.
+/// Because `num_copies` comes from the page header, i.e. the untrusted side,
+/// this is the only limit that is meaningful for paper/toner consumption — not
+/// the page count, the sheet count.
 ///
-/// 10.000 yaprak ~20 sayfa/dakikada ~8 saatlik kesintisiz baskıdır: hiçbir
-/// meşru işin yaklaşamayacağı kadar cömert, ama milyonlarca yapraktan da
-/// beş yüz kat uzak.
+/// 10,000 sheets is ~8 hours of continuous printing at ~20 pages/minute:
+/// generous enough that no legitimate job comes near it, yet five hundred
+/// times short of millions of sheets.
 pub const MAX_JOB_IMPRESSIONS: u64 = 10_000;
 
-/// Bir işin tükettiği kaynakların toplu muhasebesi.
+/// The combined accounting of the resources a job consumes.
 ///
-/// Üç sayacın da tek bir yerde durmasının nedeni, birbirlerinin körlüğünü
-/// kapatmaları: sayfa sayısı çözünürlük körü, raster hacmi kopya körü, yaprak
-/// sayısı ise sayfa boyutu körüdür. Ayrı ayrı uygulandıklarında aralarındaki
-/// çarpımsal boşluklar (bkz. `MAX_JOB_IMPRESSIONS`) gözden kaçıyordu.
+/// All three counters live in one place because they cover each other's
+/// blindness: page count is resolution-blind, raster volume is copy-blind, and
+/// sheet count is page-size-blind. Applied separately, the multiplicative gaps
+/// between them (see `MAX_JOB_IMPRESSIONS`) went unnoticed.
 #[derive(Debug, Default)]
 pub struct JobBudget {
     pub pages: u32,
@@ -735,18 +722,18 @@ pub struct JobBudget {
 }
 
 impl JobBudget {
-    /// Doğrulanmış bir sayfayı bütçeye işler ve sayfanın 1 TABANLI sırasını
-    /// döner. Sınırlardan herhangi biri aşılırsa iş burada durur.
+    /// Accounts a validated page against the budget and returns the page's
+    /// 1-BASED index. If any of the limits is exceeded, the job stops here.
     ///
-    /// `copies`, `sanitize_copies`'ten GEÇMİŞ değer olmalıdır: ham
-    /// `num_copies` ile saymak, yazıcıya fiilen gönderilmeyecek kopyaları
-    /// bütçeden düşerdi.
+    /// `copies` must be the value that has PASSED through `sanitize_copies`:
+    /// counting with the raw `num_copies` would charge the budget for copies
+    /// that are never actually sent to the printer.
     ///
-    /// Toplamalar `saturating_add` ile yapılıyor: sayfa başına hacim
-    /// `validate_page_header` sayesinde ~59 MB ile, sayfa sayısı da
-    /// `MAX_PAGES_PER_JOB` ile sınırlı olduğundan `u64` taşması zaten
-    /// imkânsız — ama sınırlar değişirse sessizce sarmak yerine bütçeyi aşmış
-    /// sayılması doğru davranıştır.
+    /// The additions use `saturating_add`: since the per-page volume is bounded
+    /// to ~59 MB by `validate_page_header` and the page count by
+    /// `MAX_PAGES_PER_JOB`, a `u64` overflow is already impossible — but if the
+    /// limits change, being counted as over budget is the right behaviour
+    /// rather than silently wrapping.
     pub fn account_page(&mut self, page_raster_bytes: u64, copies: u16) -> io::Result<u32> {
         let exceeded = |msg: String| io::Error::new(io::ErrorKind::InvalidData, msg);
 
@@ -782,24 +769,24 @@ impl JobBudget {
     }
 }
 
-/// Gerçekçi bir baskı işi için makul kabul edilen azami kopya sayısı.
+/// The maximum copy count considered reasonable for a realistic print job.
 ///
-/// QPDL'nin kopya alanı 16-bit'tir (teorik üst sınır 65535), ama hiçbir
-/// gerçek iş bu sınıra yakın bir değer istemez; 999, kağıt/toner israfına
-/// veya yazıcının fiziksel olarak saatlerce durmadan basmasına yol açacak
-/// bozuk/aşırı bir başlığa karşı ek bir güvenlik payı bırakır.
+/// QPDL's copy field is 16-bit (theoretical ceiling 65535), but no real job
+/// asks for anything near that limit; 999 leaves an extra safety margin
+/// against a corrupt/excessive header that would waste paper/toner or make the
+/// printer physically print for hours on end.
 pub const MAX_REALISTIC_COPIES: u16 = 999;
 
-/// CUPS Raster başlığındaki `num_copies` (u32) alanını QPDL'nin 16-bit kopya
-/// sayısı alanına güvenle sığacak şekilde normalize eder.
+/// Normalises the `num_copies` (u32) field in the CUPS Raster header so it
+/// safely fits QPDL's 16-bit copy-count field.
 ///
-/// Önceki `header.num_copies.max(1) as u16` ifadesi, 65536 (2^16) ve katları
-/// gibi değerlerde sessizce 0'a taşıyordu (`u16::MAX + 1 == 0`); bu da
-/// yazıcıya fiilen "0 kopya bas" komutu gönderilmesine yol açardı.
-/// `clamp(1, MAX_REALISTIC_COPIES)` hem alt hem üst sınırı aynı anda
-/// garanti eder: 0 asla geçmez, aşırı büyük değerler ise sessizce taşmak
-/// yerine (16-bit alana teknik olarak sığsa bile) gerçekçi bir üst sınıra
-/// sabitlenir.
+/// The previous `header.num_copies.max(1) as u16` expression silently
+/// overflowed to 0 at values like 65536 (2^16) and its multiples
+/// (`u16::MAX + 1 == 0`), which would send the printer an effective "print 0
+/// copies" command. `clamp(1, MAX_REALISTIC_COPIES)` guarantees both the lower
+/// and upper bound at once: 0 never passes, and excessive values are pinned to
+/// a realistic ceiling rather than silently overflowing (even though they
+/// would technically fit the 16-bit field).
 pub fn sanitize_copies(num_copies: u32) -> u16 {
     num_copies.clamp(1, MAX_REALISTIC_COPIES as u32) as u16
 }
