@@ -1,43 +1,39 @@
 Source: samsung-ml2160-rust
+Package: samsung-ml2160-rust
+Version: 2.0.0~alpha-2
 Section: utils
 Priority: optional
-Maintainer: Çağan ERGÜN <73942784+caganerg@users.noreply.github.com>
-Build-Depends: debhelper-compat (= 13),
-               cargo,
-               rustc (>= 1.77),
-               pkg-config,
-               libpappl-dev (>= 1.3), libpappl-dev (<< 2.0),
-               libcups2-dev (>= 2.4)
-Standards-Version: 4.7.0
-Homepage: https://github.com/caganerg/samsung-ml2160-rust
-
-Package: samsung-ml2160-rust
-Version: 2.0.0~alpha-1
 Architecture: amd64
-Depends: ${shlibs:Depends}, ${misc:Depends},
-         libcups2t64 (>= 2.4.10)
 Maintainer: Çağan ERGÜN <73942784+caganerg@users.noreply.github.com>
+Depends: libc6 (>= 2.34),
+         libgcc-s1 (>= 4.2),
+         libpappl1t64 (>= 1.3.1), libpappl1t64 (<< 2.0),
+         libcups2t64 (>= 2.4.10)
+Recommends: cups, avahi-daemon
 Homepage: https://github.com/caganerg/samsung-ml2160-rust
-Description: CUPS raster filter for Samsung ML-2160 series printers
- rastertospl-rust converts the CUPS raster stream (RaSt/RaS2/RaS3) into the
- native SPL2 / QPDL v3 format spoken by Samsung ML-2160, ML-2165, ML-2165W
- and ML-2168 monochrome laser printers: PJL job envelope, 17-byte page
- header, Algo 0x11 RLE-compressed band records and checksums.
+Description: Printer application for Samsung ML-216x laser printers
+ ml216x-printer-app is a standalone IPP Everywhere printer application for
+ Samsung ML-2160, ML-2165, ML-2165W and ML-2168 monochrome laser printers. It
+ converts the PWG Raster a client sends into the printer's native SPL2 /
+ QPDL v3 format: PJL job envelope, 17-byte page header, Algo 0x11
+ RLE-compressed band records and checksums.
  .
- The package ships the filter binary and the matching PPD.
+ It runs as a system service on the loopback address, advertises itself over
+ DNS-SD, and prints to a printer reached by a socket:// or usb:// device URI
+ that you choose yourself. No CUPS filter and no PPD are installed: any IPP
+ client, CUPS included, drives it over IPP.
  .
- This control file still describes the 1.x filter; the 2.0 Printer Application
- packaging lands with the migration. Two of its dependency lines are already
- correct for 2.0 and are recorded now because nothing derives them
- automatically:
+ This is a 2.0 alpha. The hard margins it uses are derived from the classic
+ PPD and have not yet been measured on paper, which is release gate G-1 in the
+ project's documentation. The 1.x CUPS raster filter it replaces is frozen on
+ the legacy/cups-filter-1.x branch.
  .
- libcups2-dev / libcups2t64 are named explicitly because of risk R-6. PAPPL
- embeds the CUPS raster page header by value in its print-options structure,
- so libcups defines part of the ABI we compile against — but the binary
- references no libcups symbol, so the linker drops -lcups and
- ${shlibs:Depends} records nothing for it. The dependency is real and has to
- be stated by hand.
- .
- libpappl-dev is bounded to the >= 1.3, < 2.0 range that build.rs enforces
- (decision Q-1); the runtime side comes from ${shlibs:Depends} via the
- library's symbols file.
+ Two dependency lines are stated by hand rather than derived. libcups2t64 is
+ named because of risk R-6: PAPPL embeds the CUPS raster page header by value
+ in the print-options structure it hands to this driver, so libcups defines
+ part of the ABI compiled against, but the binary references no libcups symbol
+ and no automatic tool would record it. libpappl1t64 is bounded to
+ >= 1.3, < 2.0 (decision Q-1), which is tighter than the shared-library
+ symbols alone would produce: dpkg-shlibdeps computes >= 1.0.1, while the
+ behaviour this driver relies on — how a job's resolution is selected, and how
+ system state is persisted — was read from the 1.3.1 source.

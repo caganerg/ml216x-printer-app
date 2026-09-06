@@ -1,0 +1,33 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+set -e
+
+case "$1" in
+remove)
+    if [ -d /run/systemd/system ]; then
+        systemctl disable ml216x-printer-app.service || true
+        systemctl daemon-reload || true
+    fi
+    ;;
+
+purge)
+    if [ -d /run/systemd/system ]; then
+        systemctl disable ml216x-printer-app.service || true
+        systemctl daemon-reload || true
+    fi
+    # Only on purge, and only what this package created: the printers the
+    # administrator added live in the state file, and removing the package is
+    # not a statement that they are unwanted.
+    rm -f /var/lib/ml216x-printer-app.state
+    rm -rf /var/spool/ml216x-printer-app
+    ;;
+
+upgrade | failed-upgrade | abort-install | abort-upgrade | disappear) ;;
+
+*)
+    echo "postrm called with unknown argument '$1'" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

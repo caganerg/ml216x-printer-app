@@ -8,36 +8,57 @@ License: GPL-2
  The SPL2/QPDL protocol implementation is derived from the GPLv2-licensed
  OpenPrinting SpliX project, so this driver is licensed to match.
 
-Files: src/spl.rs
+Files: crates/spl2-core/src/qpdl.rs
+       crates/spl2-core/src/geometry.rs
+       crates/spl2-core/src/engine.rs
+       crates/spl2-core/src/media.rs
        src/main.rs
        ppd/samsung-ml2160.ppd
 Copyright: 2025-2026 Çağan ERGÜN <73942784+caganerg@users.noreply.github.com>
            2006-2008 Aurélien Croc (AP²C) <aurelien@ap2c.org>
 License: GPL-2
- These three files carry material transcribed from OpenPrinting SpliX
+ These files carry material transcribed from OpenPrinting SpliX
  (https://github.com/OpenPrinting/splix), which is GPL-2.0-only. They are
  therefore a derived work and this package cannot be relicensed as GPL-2+.
  .
- src/spl.rs states the derivation in its own header: the QPDL wire constants,
- the PJL job header and its exact line order, the 17-byte page header layout
- and the Algo 0x11 RLE band encoding all come from SpliX's qpdl.cpp,
- compress.cpp, algo0x11.cpp and printer.cpp.
+ The list changed shape in the 2.0 line without changing what is derived: the
+ engine moved out of the binary into the spl2-core crate. What this paragraph
+ used to call src/spl.rs is now crates/spl2-core/src/qpdl.rs, and the geometry
+ rules that used to sit in src/main.rs are now split between
+ crates/spl2-core/src/geometry.rs and crates/spl2-core/src/engine.rs. The
+ files moved; the transcription did not grow.
  .
- src/main.rs transcribes SpliX's geometry rules, each cited at the function
- that implements it: the page-width computation from document.cpp, the hard
- margin and column-major band fill from compress.cpp _compressBandedPage, the
- duplex mapping from request.cpp, and the "halve the band height at 300x300"
- rule from compress.cpp.
+ crates/spl2-core/src/qpdl.rs states the derivation in its own header: the
+ QPDL wire constants, the PJL job header and its exact line order, the 17-byte
+ page header layout and the Algo 0x11 RLE band encoding all come from SpliX's
+ qpdl.cpp, compress.cpp, algo0x11.cpp and printer.cpp.
+ .
+ crates/spl2-core/src/geometry.rs and crates/spl2-core/src/engine.rs
+ transcribe SpliX's geometry rules, each cited at the function that implements
+ it: the page-width computation from document.cpp, the hard margin and
+ column-major band fill from compress.cpp _compressBandedPage, the duplex
+ mapping from request.cpp, and the "halve the band height at 300x300" rule
+ from compress.cpp.
+ .
+ crates/spl2-core/src/media.rs holds one derived constant: the 12.5 pt hard
+ margin, which follows SpliX's ML-2165 override.
+ .
+ src/main.rs is the frozen 1.x CUPS filter front end. It now delegates the
+ protocol and the geometry to spl2-core and keeps the SpliX citations at the
+ call sites that explain the byte-for-byte behaviour. It is not installed by
+ this package; it is kept in the source tree until the migration's P11 gate
+ passes.
  .
  ppd/samsung-ml2160.ppd takes its QPDL paper-source codes, media-type
  keywords and band size from the sibling PPDs upstream SpliX ships for this
  engine family (ml1910, ml2010, ml2525, ml1640, ml2510), as its own comments
- record.
+ record. It is likewise not installed by this package and is kept as project
+ data.
  .
- src/raster.rs and src/golden.rs are NOT derived from SpliX: raster.rs
- implements the CUPS Raster container format, and golden.rs is this project's
- own test harness. Each mentions SpliX once, as a cross-reference rather than
- as transcribed material.
+ crates/spl2-core/src/raster.rs and src/golden.rs are NOT derived from SpliX:
+ raster.rs implements the CUPS Raster container format, and golden.rs is this
+ project's own test harness. Each mentions SpliX once, as a cross-reference
+ rather than as transcribed material.
 Comment: The upstream notice was transcribed from the SpliX 2.0.1 source
  (Debian source package splix 2.0.1-1, from http://splix.ap2c.org/). Every
  file this project draws from — qpdl.cpp, compress.cpp, algo0x11.cpp,

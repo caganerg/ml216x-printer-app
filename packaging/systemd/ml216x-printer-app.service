@@ -1,0 +1,31 @@
+[Unit]
+Description=Samsung ML-216x Printer Application
+Documentation=https://github.com/caganerg/samsung-ml2160-rust
+# Avahi is what publishes the printer over DNS-SD. It is a Recommends, not a
+# Depends: without it the application still serves IPP on the loopback address,
+# it simply is not advertised.
+After=network.target avahi-daemon.service
+Wants=avahi-daemon.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ml216x-printer-app --spool-directory /var/spool/ml216x-printer-app server
+Restart=on-failure
+RestartSec=5
+
+# Runs as root, deliberately and narrowly: PAPPL puts a root server's state in
+# /var/lib/ml216x-printer-app.state and its control socket in
+# /run/ml216x-printer-app.sock, and opening a usb:// device means opening a
+# node under /dev/bus/usb. A dedicated user plus a udev rule is the better
+# shape and is deferred to hardware bring-up, because the rule needs the
+# printer's real USB vendor and product IDs and those have not been read off a
+# device yet.
+User=root
+ProtectHome=yes
+# Safe here: the root server's socket lives in /run, not in /tmp, so a private
+# /tmp does not hide it from the client subcommands.
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

@@ -67,9 +67,10 @@ conversion/dithering and input-versus-job geometry before real printing.
 
 ## Transitional CUPS filter
 
-The instructions below describe the classic filter. The Debian packaging
-recipe is historical and has not yet been migrated to build the PAPPL package.
-The updated PPD must be reloaded into an existing queue when testing 12.5 pt.
+The instructions below describe the classic filter, which is still built by
+`cargo build` and still frozen in the tree. The Debian package no longer ships
+it: [`.deb`](#debian-package-deb) now installs the printer application. The
+updated PPD must be reloaded into an existing queue when testing 12.5 pt.
 
 A CUPS raster filter (`rastertospl-rust`) for Samsung ML-2160 series monochrome laser printers, written in Rust. It converts CUPS's standard raster stream (`RaSt`/`RaS2`/`RaS3`) into the printer's native binary **SPL2 / QPDL v3** format: PJL job envelope, 17-byte page header, Algo 0x11 RLE-compressed band records, and checksums.
 
@@ -162,102 +163,80 @@ lp -d ML2160_Rust file.pdf
 
 ## Debian package (.deb)
 
-Debian 13 (trixie) and later can install the driver as a package, which
-replaces step 3 above and hands step 4 a system PPD path. The filter is
-compiled against **musl** and linked statically, so the binary in the package
-carries no libc dependency and runs unchanged on Debian 13, on later releases
-and on derivatives; the only declared dependencies are `cups` and
-`cups-filters`.
+The package installs the **2.0 printer application**, not the 1.x filter: one
+binary at `/usr/bin/ml216x-printer-app`, a systemd unit at
+`/usr/lib/systemd/system/ml216x-printer-app.service`, and the usual
+documentation under `/usr/share/doc/`. It installs **no CUPS filter and no
+PPD** — a printer application is driven over IPP, so nothing needs to live in
+CUPS' filter directory. The 1.x filter and the PPD stay in the source tree and
+are still built by `cargo build`; they are simply not what the `.deb` ships.
 
-The package installs two files — `/usr/lib/cups/filter/rastertospl-rust` and
-`/usr/share/ppd/samsung-ml2160-rust/samsung-ml2160.ppd` — plus the usual
-documentation under `/usr/share/doc/`. It does **not** create a print queue.
+The binary is dynamically linked against the archive's `libpappl1t64` and
+glibc. The musl static build the 1.x package used is gone: vendoring or
+statically linking a C library would take the package out of apt's security
+updates and make this project the response path for libpappl's CVEs.
+
+> [!NOTE]
+> This is an alpha of the 2.0 line. The hard margins have not been measured on
+> paper yet — release gate G-1 in [`docs/GOLDEN-VALIDATION.md`](docs/GOLDEN-VALIDATION.md)
+> — so treat printed output as unverified until that gate is closed.
 
 ### Build it
 
-`dpkg-dev` is not needed: a `.deb` is an `ar` archive of three members, and
-`ar`, `tar`, `xz` and `gzip` are enough to produce one. The control metadata
-lives in `packaging/debian/` and its `Version:` field is what the file name
-below has to match. The ownership warning in step 1 applies here too — the
-package embeds the filter binary that CUPS will later run as user `lp`.
-
 ```sh
-rustup target add x86_64-unknown-linux-musl
-cargo build --release --target x86_64-unknown-linux-musl
-
-REPO=$PWD
-VERSION=2.0.0~alpha-1
-DOC=usr/share/doc/samsung-ml2160-rust
-BUILD=$(mktemp -d)
-mkdir -p "$BUILD"/root/usr/lib/cups/filter \
-         "$BUILD"/root/usr/share/ppd/samsung-ml2160-rust \
-         "$BUILD"/root/"$DOC" "$BUILD"/control
-
-install -m 755 target/x86_64-unknown-linux-musl/release/rastertospl-rust \
-    "$BUILD/root/usr/lib/cups/filter/rastertospl-rust"
-install -m 644 ppd/samsung-ml2160.ppd \
-    "$BUILD/root/usr/share/ppd/samsung-ml2160-rust/samsung-ml2160.ppd"
-install -m 644 packaging/debian/copyright "$BUILD/root/$DOC/copyright"
-gzip -9nc packaging/debian/changelog > "$BUILD/root/$DOC/changelog.Debian.gz"
-gzip -9nc README.md > "$BUILD/root/$DOC/README.md.gz"
-chmod 644 "$BUILD"/root/"$DOC"/*.gz
-
-awk -v s="$(du -sk --apparent-size "$BUILD/root" | cut -f1)" \
-    '/^Description:/ && !d { print "Installed-Size: " s; d = 1 } { print }' \
-    packaging/debian/control > "$BUILD/control/control"
-( cd "$BUILD/root" && find . -type f -printf '%P\n' | LC_ALL=C sort | xargs md5sum ) \
-    > "$BUILD/control/md5sums"
-chmod 644 "$BUILD/control/control" "$BUILD/control/md5sums"
-
-printf '2.0\n' > "$BUILD/debian-binary"
-TARFLAGS="--owner=root --group=root --numeric-owner --sort=name --mtime=@0"
-tar $TARFLAGS -C "$BUILD/root"    -cf - . | xz -9e > "$BUILD/data.tar.xz"
-tar $TARFLAGS -C "$BUILD/control" -cf - . | xz -9e > "$BUILD/control.tar.xz"
-
-mkdir -p "$REPO/dist"
-( cd "$BUILD" && ar rcD "$REPO/dist/samsung-ml2160-rust_${VERSION}_amd64.deb" \
-    debian-binary control.tar.xz data.tar.xz )
+./scripts/build-deb.sh
 ```
 
-The `--owner=root --group=root --numeric-owner` flags are not cosmetic: they are
-what makes the installed filter root-owned regardless of who built the package.
+`dpkg-dev` is still not required — `dpkg-deb` comes with `dpkg` itself. The
+script checks that `libpappl-dev` is present and inside the `>= 1.3, < 2.0`
+range before it builds anything, so a wrong library version fails with a
+sentence rather than with a link error, and it writes
+`dist/samsung-ml2160-rust_<version>_<arch>.deb`. The metadata it packs comes
+from `packaging/debian/`: `control`, `copyright`, `changelog` and the three
+maintainer scripts.
 
-### Install it and register the queue
-
-```sh
-sudo apt install ./dist/samsung-ml2160-rust_2.0.0~alpha-1_amd64.deb
-sudo lpadmin -p ML2160_Rust -E -v "$DEVICE_URI" \
-    -P /usr/share/ppd/samsung-ml2160-rust/samsung-ml2160.ppd
-```
-
-`$DEVICE_URI` comes from step 2 above. Use `apt install ./…` rather than
-`dpkg -i` so that `cups` and `cups-filters` are pulled in if they are missing.
-
-Because the PPD now lives under `/usr/share/ppd/`, CUPS lists it as a model in
-its own driver database, so you can name it by model instead of by path — and
-the graphical tools (CUPS' web interface at <http://localhost:631> →
-*Administration* → *Add Printer*, or GNOME/KDE printer settings) offer it under
-*Samsung ML-2160/2165/2165W/2168 Series, Rust SPL2 Driver* once the package is
-installed:
+### Install it
 
 ```sh
-lpinfo -m | grep -i ml-216       # samsung-ml2160-rust/samsung-ml2160.ppd …
-sudo lpadmin -p ML2160_Rust -E -v "$DEVICE_URI" \
-    -m samsung-ml2160-rust/samsung-ml2160.ppd
+sudo apt install ./dist/samsung-ml2160-rust_2.0.0~alpha-2_amd64.deb
+systemctl status ml216x-printer-app
 ```
 
-The device URI still has to be chosen — it is a property of your machine (a USB
-serial number, or the printer's address), not of the package, so nothing that
-ships in the `.deb` can know it. What the graphical dialogs save you is the
-typing, not the choice: they show the detected USB device as a line you click,
-which is the same deliberate pick the note in step 2 asks for. Network models
-are not detected at all — these printers speak no IPP, only raw JetDirect — so
-there `socket://<printer-ip>:9100` remains something you enter by hand.
+Use `apt install ./…` rather than `dpkg -i`, so the library dependencies are
+resolved. Installing enables and starts the service; it listens on the loopback
+address at port 8631 and advertises itself over DNS-SD if `avahi-daemon` is
+running. Until you add a printer it does nothing else.
 
-To remove it, delete the queues first (`sudo lpadmin -x ML2160_Rust`, see
-[Uninstallation](#uninstallation)) and then `sudo apt remove samsung-ml2160-rust`
-— `apt remove` takes the filter away from every queue built on it, including any
-it did not create.
+### Add your printer
+
+The service knows how to talk to the printer; it does not know where the
+printer is. That is one command, and the device URI is yours to choose:
+
+```sh
+sudo ml216x-printer-app devices          # what is attached, if anything
+sudo ml216x-printer-app add -d ML2160 -m samsung_ml216x -v "$DEVICE_URI"
+```
+
+`$DEVICE_URI` is a `usb://…` line copied from `devices`, or
+`socket://<printer-ip>:9100` for a network model — these printers speak no IPP
+of their own, only raw JetDirect. The warning in step 2 of the filter
+instructions above applies here too and is why nothing is auto-detected: a
+device ID is self-reported, so an attacker's device can claim to be a Samsung
+ML-216x. Read the line yourself and pass it yourself.
+
+The queue then appears to CUPS and to every other IPP client as
+`ipp://localhost:8631/ipp/print/ML2160`, and CUPS discovers it over DNS-SD
+without a PPD.
+
+### Remove it
+
+```sh
+sudo apt remove samsung-ml2160-rust     # stops and disables the service
+sudo apt purge samsung-ml2160-rust      # also drops /var/lib/ml216x-printer-app.state
+```
+
+`remove` leaves the printers you added on disk, so reinstalling brings them
+back; `purge` is what forgets them.
 
 ## Print options
 
@@ -310,6 +289,10 @@ lpoptions -d ML2160_Rust -l            # list every option and its choices
 > longer valid choices and should be set again.
 
 ## Uninstallation
+
+This section is about the **manually installed** 1.x filter. If you installed
+the package instead, `apt remove samsung-ml2160-rust` is the whole story — see
+[Remove it](#remove-it) — because the package ships no filter binary.
 
 ### 1. Remove the queue
 
@@ -371,11 +354,22 @@ A well-formed `out.spl` starts with `\x1b%-12345X@PJL`, contains
 
 ## Project Structure
 
-- `src/main.rs` — CUPS filter entry point: argument parsing, page/band loop
-- `src/raster.rs` — CUPS Raster (V1/V2/V3) header parser
-- `src/spl.rs` — SPL2/QPDL protocol: PJL envelope, page/band records, Algo 0x11 RLE
-- `ppd/samsung-ml2160.ppd` — CUPS PPD file
-- `packaging/debian/` — `control`, `copyright` and `changelog` for the `.deb`
+- `crates/spl2-core/` — the protocol engine, shared byte for byte by both front
+  ends: `qpdl.rs` (PJL envelope, page/band records, Algo 0x11 RLE), `geometry.rs`
+  and `engine.rs` (the SpliX geometry rules), `raster.rs` (the CUPS Raster
+  V1/V2/V3 parser, behind the `golden-replay` feature)
+- `crates/pappl-sys/`, `crates/pappl/` — hand-written FFI for libpappl 1.3 and
+  the safe wrapper that owns every `unsafe` line and the callback boundary
+- `crates/ml216x-printer-app/` — the 2.0 binary: the SPL2 raster driver and the
+  capability table
+- `src/main.rs`, `src/golden.rs` — the frozen 1.x CUPS filter front end and the
+  golden-file harness that pins its output
+- `ppd/samsung-ml2160.ppd` — CUPS PPD for the 1.x queue; kept permanently as
+  project data
+- `packaging/debian/` — `control`, `copyright`, `changelog` and the maintainer
+  scripts; `packaging/systemd/` — the service unit
+- `scripts/` — `build-deb.sh` builds the package; `p5-probe.py` and
+  `transport-probe.py` drive the printer application over loopback
 
 ## License
 

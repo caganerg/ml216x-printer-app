@@ -1,0 +1,29 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0-only
+set -e
+
+case "$1" in
+configure)
+    # The spool directory is the service's, not a user's: a raster job is
+    # written here before it is converted, so it must not be world readable.
+    mkdir -p /var/spool/ml216x-printer-app
+    chmod 700 /var/spool/ml216x-printer-app
+
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+        systemctl enable ml216x-printer-app.service
+        # `restart` rather than `start`, so an upgrade actually runs the new
+        # binary instead of leaving the old one serving.
+        systemctl restart ml216x-printer-app.service
+    fi
+    ;;
+
+abort-upgrade | abort-remove | abort-deconfigure) ;;
+
+*)
+    echo "postinst called with unknown argument '$1'" >&2
+    exit 1
+    ;;
+esac
+
+exit 0

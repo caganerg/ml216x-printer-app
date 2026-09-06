@@ -1,3 +1,20 @@
+samsung-ml2160-rust (2.0.0~alpha-2) unstable; urgency=medium
+
+  * The package is now the printer application, not the CUPS filter. It
+    installs /usr/bin/ml216x-printer-app and a systemd unit that runs it as a
+    system service on the loopback address; it installs no filter and no PPD,
+    which is decision Q-5's clean break for what we ship. The 1.x filter and
+    the PPD stay in the source tree.
+  * Dynamically linked against the archive's libpappl and glibc, so the musl
+    static build is gone (decisions Q-1 and Q-7). Dependencies are stated
+    explicitly rather than through ${shlibs:Depends}, which nothing in this
+    build path would ever substitute; they were derived from the binary and
+    cross-checked with dpkg-shlibdeps.
+  * Built by scripts/build-deb.sh, which checks the libpappl version range
+    before building rather than only declaring it.
+
+ -- Çağan ERGÜN <caganergun@tutanota.com>  Sun, 06 Sep 2026 18:20:00 +0300
+
 samsung-ml2160-rust (2.0.0~alpha-1) unstable; urgency=medium
 
   * Open the 2.0 development line. The 1.x CUPS raster filter is frozen at
