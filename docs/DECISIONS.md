@@ -20,6 +20,166 @@ outside the Q-1..Q-11 range.
 
 ---
 
+## 2026-09-06 — Q-14 (OPEN): a normal-quality job runs at a resolution the document was never rendered at
+
+Raised while analysing the state of the tree before P7, by driving the built
+application over a loopback socket. It is the most serious thing found so far
+on the PAPPL path, and it is the realisation of P5 finding 3 — "request
+matching IPP and raster resolutions, PAPPL can otherwise construct a different
+output header and pad/crop the incoming data".
+
+**What was measured.** `scripts/pwg-probe-input.c` generated one A4 page at
+600x600 dpi (4960 px wide, 620 bytes per line). It was submitted with
+`ipptool` to a printer added at `socket://127.0.0.1:PORT`, with no
+`printer-resolution` in the request. The job **completed successfully** and
+45453 bytes of QPDL reached the socket. The driver's own log line for that job
+reads `cupsWidth=9921, pageWidthPx=9920, bandWidthPx=9920, bandWidthB=1240,
+hardMarginB=27` — that is A4 at **1200x600 dpi**, not the 600x600 the document
+was rendered at. Repeating the same submission with
+`ATTR resolution printer-resolution 600dpi` produced `cupsWidth=4960,
+bandWidthB=620, hardMarginB=14` and 28759 bytes, which is correct.
+
+So the printer's declared default (`x_default`/`y_default` = 600) is **not**
+what an ordinary job gets. The hypothesis that fits the numbers is that PAPPL
+picks a resolution from the list by print-quality — `normal` selecting the
+middle entry of `[(300,300), (600,600), (1200,600), (1200,1200)]`, which is
+`(1200,600)`. That hypothesis has not been checked against PAPPL's source and
+must not be relied on until it is.
+
+**Why this is more than a wrong page size.** `crates/pappl/src/application.rs`
+builds the scanline slice as
+`std::slice::from_raw_parts(line, raw.header.cupsBytesPerLine)` — 1241 bytes
+in the measured job — from the **options** header. If PAPPL sizes the buffer it
+passes to `rwriteline_cb` from the **document's** header (620 bytes here),
+every scanline is a 621-byte out-of-bounds read reachable from an ordinary
+print job. Which header sizes that buffer is not decidable from the installed
+headers; `pappl/job-process.c` from `pappl 1.3.1-2.1` decides it. Until that
+is read, this is an undetermined ABI/lifetime question and is treated as a real
+exposure, not as "probably fine".
+
+Candidate resolutions:
+
+- **(a) Read `pappl/job-process.c` first, then fail the job on any mismatch.**
+  Establish from the source how the line buffer is sized and whether PAPPL
+  scales, pads or crops raster input; size the slice from whatever PAPPL
+  actually guarantees; and refuse a job whose document header disagrees with
+  the options header, with a specific error and log line, never a clamp.
+- **(b) Honour the document header** and re-derive the geometry from it,
+  ignoring the options header for raster jobs.
+- **(c) Constrain what PAPPL can choose** — declare fewer resolutions, or map
+  quality to resolution ourselves — so the options header cannot disagree.
+
+**Expectation: (a) as the immediate step, and it is a prerequisite for
+everything else in P7.** (b) may well be the right end state, but it cannot be
+chosen before the source says what the buffer is; (c) alone hides the mismatch
+instead of refusing it, and a page that looks fine until measured is worse than
+a refused job. Note that failing every job that does not pin its resolution
+would make the printer useless to ordinary clients, so (a) has to be paired
+with whichever of (b) or (c) makes the common case correct — that pairing is
+the decision this question asks for.
+
+`apt-get source pappl` needs a network fetch from `deb.debian.org`, which is
+why it is proposed here rather than already done.
+
+---
+
+## 2026-09-06 — Q-15 (OPEN): the persisted state file carries printers across driver modes
+
+Raised in the same session. PAPPL's mainloop persists the system to
+`$XDG_CONFIG_HOME/ml216x-printer-app.state` and reloads it at startup on its
+own; nothing in this repository calls `papplSystemLoadState` or
+`papplSystemSaveState`. That was observed directly: a `probe` printer created
+by an earlier `--probe --probe-output` session was still in the user's state
+file and was **re-created at startup by a plain `server` run**, which attaches
+`Spl2Driver` rather than `GeometryProbe`.
+
+The `--probe` guard is therefore not durable. `driver_cb` refuses a non-`file://`
+URI while `app.probe` is set, but the two drivers share one driver name
+(`samsung_ml216x`) and the state file records only that name, so a printer
+created under one driver is silently re-created under the other. The
+fail-closed direction (a socket printer reloaded in probe mode) is caught by
+the URI guard; the fail-open direction — a printer named `probe`, reloaded
+under the real SPL2 driver, pointed at whatever URI it was created with — is
+not caught by anything.
+
+Candidate resolutions:
+
+- **(a) Give probe mode its own state file and its own driver name**, so the
+  two modes cannot see each other's printers at all.
+- **(b) Refuse to reload printers created in the other mode**, by recording the
+  mode in the driver name or the device ID and rejecting a mismatch at load.
+- **(c) Disable state persistence in probe mode** entirely, so a probe printer
+  never outlives its run.
+
+**Expectation: (a).** It is the only one of the three where the isolation does
+not depend on a check being reached, and it costs one extra CLI flag. Whatever
+is chosen, `scripts/p5-probe.py` already scopes `XDG_CONFIG_HOME` to a
+temporary directory, and any manual run must do the same — a plain
+`ml216x-printer-app server` writes into the user's real `~/.config`.
+
+---
+
+## 2026-09-06 — Q-16 (OPEN): the SPL2 driver advertises the geometry probe's format
+
+Raised in the same session. `driver_cb` sets
+`data.format = "application/x-pappl-geometry-probe"` unconditionally, so the
+SPL2 driver inherits the P5 instrument's MIME type. It is not internal: PAPPL
+publishes it, and the persisted state shows the printer's IEEE-1284 device ID
+as `MFG:Samsung;MDL:ML-216x (P5 development);CMD:PWGRaster,URF,application/x-pappl-geometry-probe,JPEG,PNG;`,
+while the server log says "Driver supports raw printing of
+'application/x-pappl-geometry-probe' files". `printfile_cb` rejects such jobs,
+so nothing is mis-printed today; what is wrong is what the printer claims to be.
+
+The PPD's own answer for the classic queue is
+`*1284DeviceID: "MFG:Samsung;MDL:ML-2160 Series;CMD:SPL,FWV,EXT;"`
+(`ppd/samsung-ml2160.ppd:30`), which is the only device-ID evidence in the tree.
+
+Candidate resolutions:
+
+- **(a) Give the SPL2 driver its own format string** and leave the probe MIME
+  to the probe driver; keep `printfile_cb` rejecting raw jobs, so the string is
+  a label rather than an offer.
+- **(b) Declare no printer-specific format at all** for the SPL2 driver, since
+  raw printing is refused anyway.
+- **(c) Accept raw SPL2 files** — advertise the format and implement
+  `printfile_cb` as a pass-through.
+
+**Expectation: (b) for 2.0, or (a) if a name is wanted in the device ID.** (c)
+is a feature, not a fix, and it would let an unvalidated stream reach the
+engine. What the `MDL` and `CMD` fields should finally say is part of the same
+decision, and it is the maintainer's: the PPD says `SPL,FWV,EXT` for real
+hardware, while the application currently announces itself as
+"ML-216x (P5 development)".
+
+---
+
+## 2026-09-06 — Q-17 (OPEN): discovery, and whether the application may ever add a printer by itself
+
+Raised in the same session, because P7 is the step where it would be
+implemented if it were wanted. `papplMainloop` is called with
+`autoadd_cb = None` today, and the README already takes a position on the
+matter for the 1.x queue: "Pick the device URI yourself rather than letting
+anything auto-detect it. CUPS device discovery is unauthenticated — over the
+network (mDNS/Bonjour/SNMP) and over USB (descriptor strings) alike — so any
+device can advertise itself as a 'Samsung ML-216x' and be wired up as the print
+destination" (`README.md`).
+
+Candidate resolutions:
+
+- **(a) Never wire `autoadd_cb`.** `devices` lists what is attached, the person
+  reads it and passes `-v` to `add`, exactly as the README's note asks.
+- **(b) Wire `autoadd_cb` but match strictly** on the IEEE-1284 device ID
+  through `papplDeviceParseID`, accepting only `MFG:Samsung` with a known `MDL`.
+- **(c) Wire it unconditionally**, matching any device the driver can drive.
+
+**Expectation: (a)**, because it is what the README already promises and
+because the threat it describes is exactly what (b) and (c) reopen: a device ID
+is self-reported and unauthenticated. Recording it as a decision matters
+because "we never got round to it" and "we decided not to" look identical in
+the code.
+
+---
+
 ## 2026-09-06 — Q-13 (OPEN): the vertical hard margin has no precedent in the tree
 
 Raised while connecting the SPL2 callbacks (P6). It is the one number on the

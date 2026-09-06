@@ -59,15 +59,76 @@ That is open question **Q-13**, and G-1 must measure it.
    failure and refuses `rendpage`/`rendjob`; `/dev/full` produced job-state=aborted.
 6. PAPPL increments PWG impressions itself. Do not double count.
 
-## Next work
+## What the transport actually does today
 
-Device transport: USB first, then socket (Q-10). Today the application can only
-reach a `file://` destination, so nothing has been sent to a printer. Then P9's
-raster-type and dithering review — the probe measured BLACK_1/PWG only, and
-nothing characterises what PAPPL's PNG or JPEG conversion produces. Keep the
-original filter in-tree until P11 passes; keep the PPD permanently. Hardware
-G-1 and open questions Q-12 and Q-13 remain outstanding. No hardware print was
-performed.
+Corrects an earlier statement here that the application "can only reach a
+`file://` destination". Measured on 2026-09-06 by driving the built binary:
+
+* **A `socket://` destination already works end to end.** With the server
+  running, `add -d NAME -m samsung_ml216x -v socket://127.0.0.1:PORT` succeeds
+  and an `ipptool` `Print-Job` of a PWG raster page delivers real QPDL to a
+  loopback TCP sink — 28759 bytes, opening with the UEL and the PJL envelope
+  and closing with `\t` plus the UEL. Nothing in the code had to change for
+  this; `papplSystemSetPrinterDrivers` is called only on the probe path, and
+  `add` works regardless.
+* **USB is unexercised, not unimplemented.** No Samsung device is attached to
+  this machine, so `usb://` has never been opened. PAPPL's built-in USB scheme
+  is what would carry it.
+* **The state file is PAPPL's, not ours.** The mainloop persists printers to
+  `$XDG_CONFIG_HOME/ml216x-printer-app.state` and reloads them at startup
+  without this repository calling either state function. A manual run that does
+  not scope `XDG_CONFIG_HOME` writes into the user's real `~/.config`; only
+  `scripts/p5-probe.py` scopes it today.
+
+## Next work — P7, device transport and the job-geometry contract
+
+**P7 opens with a defect, not with a feature.** A job submitted without an
+explicit `printer-resolution` ran at 1200x600 while the document was rendered
+at 600x600, and completed rather than failing: `cupsWidth=9921`,
+`bandWidthB=1240`, `hardMarginB=27` for a document 4960 px wide with 620-byte
+lines. That is open question **Q-14**, and it carries a possible out-of-bounds
+read, because the scanline slice is sized from the options header while the
+buffer may be sized from the document's. Order of work:
+
+1. **Read `pappl/job-process.c` from `pappl 1.3.1-2.1`** and settle how the
+   `rwriteline_cb` buffer is sized and whether PAPPL scales, pads or crops
+   raster input. Everything else in P7 depends on the answer. Needs a network
+   fetch (`apt-get source pappl`), so ask first.
+2. **Make the geometry contract explicit**: size the slice from what PAPPL
+   guarantees, and fail a job whose document header disagrees with the options
+   header — a specific error and log line, never a clamp. Regression test: a
+   600 dpi document into a 1200x600 job must end `job-state=aborted`.
+3. **A transport harness** (`scripts/transport-probe.py`, in the shape of
+   `p5-probe.py`): loopback TCP sink, printer added over `socket://`, and the
+   received bytes compared **byte for byte** with the same job run to
+   `file://`. It only counts once it has been shown to go red — truncate the
+   sink's stream and watch it fail.
+4. **USB**, as far as it goes without hardware: a `devices` listing check,
+   `papplDeviceIsSupported` on a `usb://` URI, and the permission story written
+   down — access to `/dev/bus/usb` is a packaging matter, not a code one.
+5. **Q-15's state-file isolation**, so a probe printer cannot come back under
+   the SPL2 driver.
+6. **Q-16's format string and device ID**, so the printer stops advertising the
+   geometry probe's MIME type.
+7. **Q-17 recorded as a decision** — no `autoadd_cb`, matching the README.
+
+Two smaller items found alongside, neither blocking:
+
+* `spl2-core` still emits Turkish diagnostics, and they now surface in PAPPL's
+  job log ("Hesaplanan bant genişliği (1240 B) ..."). Q-11's known-deviation
+  list named only `src/golden.rs` and `goldens/README.md`; it is wider.
+* PAPPL 1.3.1's own log lines drop the last character of formatted numbers —
+  "Device write metrics: 4545 bytes" for 45453 bytes actually written,
+  "60x60dpi" for `600x600dpi` as stored in the state file, "3276 clients" for
+  32768. Our own log lines are formatted in Rust and are unaffected. Worth
+  confirming in the source before it is reported anywhere, and worth knowing
+  before anyone debugs from those numbers.
+
+Then P9's raster-type and dithering review — the probe measured BLACK_1/PWG
+only, and nothing characterises what PAPPL's PNG or JPEG conversion produces.
+Keep the original filter in-tree until P11 passes; keep the PPD permanently.
+Hardware G-1 and open questions Q-12 to Q-17 remain outstanding. No hardware
+print was performed.
 
 Checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo fmt --all --check`, golden checksums, and all three `p5-probe.py` modes
@@ -89,6 +150,7 @@ the prompt series has not named, and are left blank rather than guessed.
 | P4 | `pappl`: the safe wrapper and the `catch_unwind` callback shim | P7 |
 | P5 | Minimal PAPPL app; the printable-area vs full-media experiment (`docs/MARGINS.md`) | — |
 | P6 | `spl2-core` extraction and the SPL2 raster callbacks | — |
+| P7 | Device transport and the job-geometry contract (Q-10, Q-14 to Q-17) | — |
 | P9 | Raster-type decision, and the dithering-exposure question | — |
 | P11 | The gate after which the frozen 1.x filter may be removed (Q-5) | — |
 | P12 | Hardware bring-up; release gate G-1, the physical margin measurement | P12 |
