@@ -300,4 +300,11 @@ behaviour itself lives in `crates/spl2-core/src/geometry.rs` around `compute_pag
 `hard_margin_bytes` and `band_placement`, and in `crates/spl2-core/src/qpdl.rs` around
 `begin_job`, `begin_page`, `write_compressed_band`, `end_page` and `end_job`.
 The `v1.x-final` recovery anchor is an annotated tag: object `7c0cf2c`,
-commit `33d4ff2`, both present on `origin`.
+commit `33d4ff2`, both present on `origin`. **It is now the only ref that names
+the 1.x line.** The `legacy/cups-filter-1.x` branch was deleted on 2026-09-06,
+locally and on `origin`, because the project supports the 2.0 line only. That
+was checked before it was done rather than assumed: the branch tip `1ebcafa`
+was an ancestor of both the tag and `main`, and `git rev-list --count
+main..legacy/cups-filter-1.x` was 0, so no commit existed only there. Deleting
+the branch is not P11 and does not touch the 1.x filter, which stays in the
+tree as the root crate until that gate passes (decision Q-5).

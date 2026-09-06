@@ -11,6 +11,9 @@ ml216x-printer-app (2.0.0~alpha-5) unstable; urgency=medium
     keeps a backstop for the case where a dangling enablement symlink survives
     anyway: a root server holding port 8631 would keep the user service from
     ever binding.
+  * The package description now points at the v1.x-final tag rather than the
+    legacy/cups-filter-1.x branch, which has been deleted: the project supports
+    the 2.0 line only, and the branch carried no commit the tag and main do not.
   * Note for anyone who installed the old package: apt handles the transition,
     but its per-user state is not touched by any of this. Printers you added
     live in ~/.config/ml216x-printer-app.state and stay there.

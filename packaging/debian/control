@@ -33,8 +33,8 @@ Description: Printer application for Samsung ML-216x laser printers
  .
  This is a 2.0 alpha. The hard margins it uses are derived from the classic
  PPD and have not yet been measured on paper, which is release gate G-1 in the
- project's documentation. The 1.x CUPS raster filter it replaces is frozen on
- the legacy/cups-filter-1.x branch.
+ project's documentation. The 1.x CUPS raster filter it replaces is frozen at
+ the v1.x-final tag, and its source is still in this package's source tree.
  .
  This package was called samsung-ml2160-rust up to 2.0.0~alpha-4, and was
  renamed with the repository. Both install /usr/bin/ml216x-printer-app and

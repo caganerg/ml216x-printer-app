@@ -1,10 +1,14 @@
 # Legacy CUPS filter reference
 
-The root package `rastertospl-rust` retains `rastertospl-rust` for golden
+The root package `rastertospl-rust` retains the 1.x filter for golden
 regression tests and hardware comparison until migration gate P11 passes.
 The PPD remains project data: tests compare its capabilities with the IPP table.
 Neither is installed by the 2.0 Debian package. The untouched 1.x version is
-available on `legacy/cups-filter-1.x` and `v1.x-final`.
+available at the annotated tag `v1.x-final` (tag object `7c0cf2c`, commit
+`33d4ff2`). The `legacy/cups-filter-1.x` branch that used to carry the same
+commits was deleted on 2026-09-06, when the project narrowed to supporting 2.0
+only; it held nothing the tag and `main` do not, so `git checkout v1.x-final`
+reaches exactly what the branch reached.
 
 Build and run the reference explicitly:
 
