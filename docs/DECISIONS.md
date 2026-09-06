@@ -932,8 +932,27 @@ them user-visible: they are written into the printer application's job log,
 where a Turkish sentence reached a reader who has no reason to read Turkish.
 All of them are now English, along with the test assertions that matched on
 them; the goldens are byte identical across the change, because no diagnostic
-reaches the SPL2 stream. What remains Turkish is the **comments** — in
-`src/main.rs`, `src/golden.rs` and the four `spl2-core` modules — plus
-`goldens/README.md`. Those are the legacy the original deviation named, and
-none of them is user-visible, so they are left to a dedicated pass rather than
-mixed into a change about behaviour.
+reaches the SPL2 stream. What remained Turkish after that pass was the
+**comments** — in `src/main.rs`, `src/golden.rs` and the four `spl2-core`
+modules — plus `goldens/README.md`.
+
+**Closed 2026-09-06.** The dedicated comment pass is done and the deviation is
+gone. `src/golden.rs`, `goldens/README.md` and the `spl2-core` modules had
+already been converted; what was left was the whole test module of
+`src/main.rs`, roughly 1,500 lines of Turkish doc comments, inline comments and
+`assert!`/`expect` messages, and it is now English. Nothing outside a comment
+or a failure message changed, the goldens verify byte identical, and
+`cargo test --workspace` is green.
+
+Three Turkish fragments remain in the tree on purpose, and none of them is
+prose to translate:
+
+* the Turkish-character folding table in `crates/spl2-core/src/qpdl.rs` and the
+  test data that exercises it (`sanitize_pjl_field("Öğrenci Başvurusu")`) —
+  that is what the function is *for*;
+* the deliberately non-ASCII job title in `src/golden.rs`
+  (`"Örnek Çıktı — ünlü ğüş İŞ"`), which is the input of the
+  `a4-600-marks-utf8-title` golden; changing it would change pinned bytes;
+* quotations in `docs/MIGRATION-PLAN.md` of strings that existed in the
+  pre-migration tree, which are evidence of what that tree said and are not
+  edited after the fact.

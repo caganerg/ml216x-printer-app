@@ -688,7 +688,7 @@ mod tests {
                     buf[off..off + 4].copy_from_slice(&val.to_be_bytes());
                 };
                 put(272, self.duplex as u32);
-                put(312, self.margin_left_pt); // Margins[0] (sol, pt)
+                put(312, self.margin_left_pt); // Margins[0] (left, pt)
                 put(324, self.media_position);
                 put(276, self.res_x);
                 put(280, self.res_y);
@@ -729,31 +729,33 @@ mod tests {
     ///
     /// The buffer is transposed: `band[col * band_height + y]`.
     fn first_band_buffer(out: &[u8]) -> Vec<u8> {
-        // Kayıt konumu deterministik olarak bulunur: 0x0C baytını aramak
-        // güvenli değil, çünkü sayfa başlığının 0x4 baytı da (EnvIsoB5 kağıt
-        // kodu) 0x0C olabilir.
+        // The record is located deterministically: searching for a 0x0C byte
+        // is not safe, because byte 0x4 of the page header (the EnvIsoB5 paper
+        // code) can be 0x0C as well.
         const QPDL_MARK: &[u8] = b"ENTER LANGUAGE = QPDL\n";
         let pos = out
             .windows(QPDL_MARK.len())
             .position(|w| w == QPDL_MARK)
-            .expect("QPDL diline geçiş satırı yok")
+            .expect("no QPDL language-switch line in the stream")
             + QPDL_MARK.len()
-            + 17; // 17 baytlık sayfa başlığından sonrası
-        assert_eq!(out[pos], 0x0C, "şerit kaydı imzası beklendi");
-        assert_eq!(out[pos + 6], 0x11, "Algo 0x11 bekleniyordu");
+            + 17; // past the 17-byte page header
+        assert_eq!(out[pos], 0x0C, "expected a band record signature");
+        assert_eq!(out[pos + 6], 0x11, "expected Algo 0x11");
         let total = u32::from_be_bytes(out[pos + 7..pos + 11].try_into().unwrap()) as usize;
-        // 11 bayt kayıt başlığı + 4 bayt alt başlık; sondaki 4 bayt checksum.
+        // 11-byte record header + 4-byte sub-header; the trailing 4 bytes are
+        // the checksum.
         let payload = &out[pos + 15..pos + 11 + total - 4];
         let mut band = Algo0x11::decompress(payload);
-        // `stream_page_bands` yazmadan hemen önce tersliyor; geri al.
+        // `stream_page_bands` inverts the buffer immediately before writing
+        // it; undo that here.
         for b in &mut band {
             *b = !*b;
         }
         band
     }
 
-    /// Transpoze bant tamponunda, ilk satırdaki (`y == 0`) sıfır olmayan
-    /// baytların sütun indislerini döner.
+    /// The column indices of the non-zero bytes on the first line (`y == 0`)
+    /// of a transposed band buffer.
     fn nonzero_columns_in_first_line(band: &[u8], band_height: usize) -> Vec<usize> {
         band.chunks(band_height)
             .enumerate()
@@ -762,7 +764,7 @@ mod tests {
             .collect()
     }
 
-    /// Üretilen SPL akışındaki tek bir şerit kaydının başlık alanları.
+    /// The header fields of one band record in the produced SPL stream.
     #[derive(Debug, PartialEq, Eq)]
     struct BandRecord {
         index: u8,
@@ -770,27 +772,28 @@ mod tests {
         height_lines: u16,
     }
 
-    /// Üretilen SPL akışındaki tek bir sayfa: 17 baytlık başlık + şeritleri.
+    /// One page of the produced SPL stream: a 17-byte header and its bands.
     #[derive(Debug)]
     struct SplPage {
         header: [u8; 17],
         bands: Vec<BandRecord>,
     }
 
-    /// SPL çıktısını gerçek kayıt yapısına göre ayrıştırır. Testlerin
-    /// varsayımlarını değil, tele yazılan baytları doğrulayabilmesi için.
+    /// Parses the SPL output along its real record structure, so that a test
+    /// asserts on the bytes written to the wire rather than on its own
+    /// assumptions about them.
     fn parse_spl(out: &[u8]) -> Vec<SplPage> {
         const QPDL_MARK: &[u8] = b"ENTER LANGUAGE = QPDL\n";
         let start = out
             .windows(QPDL_MARK.len())
             .position(|w| w == QPDL_MARK)
-            .expect("QPDL diline geçiş satırı yok")
+            .expect("no QPDL language-switch line in the stream")
             + QPDL_MARK.len();
 
         let mut pages = Vec::new();
         let mut pos = start;
         while pos < out.len() && !out[pos..].starts_with(spl::PJL_END) {
-            assert_eq!(out[pos], 0x00, "sayfa başlığı imzası beklendi @ {}", pos);
+            assert_eq!(out[pos], 0x00, "expected a page header signature @ {}", pos);
             let mut header = [0u8; 17];
             header.copy_from_slice(&out[pos..pos + 17]);
             pos += 17;
@@ -803,11 +806,15 @@ mod tests {
                     width_px: u16::from_be_bytes(out[pos + 2..pos + 4].try_into().unwrap()),
                     height_lines: u16::from_be_bytes(out[pos + 4..pos + 6].try_into().unwrap()),
                 });
-                // 11 baytlık kayıt başlığı + (alt başlık + payload + checksum)
+                // 11-byte record header + (sub-header + payload + checksum)
                 pos += 11 + total;
             }
 
-            assert_eq!(out[pos], 0x01, "sayfa sonu imzası beklendi @ {}", pos);
+            assert_eq!(
+                out[pos], 0x01,
+                "expected an end-of-page signature @ {}",
+                pos
+            );
             pos += 3;
             pages.push(SplPage { header, bands });
         }
@@ -822,7 +829,7 @@ mod tests {
             &mut out,
             &current_service_date(),
         )
-        .expect("filtre geçerli akışı işleyemedi");
+        .expect("the filter failed on a valid stream");
         out
     }
 
@@ -833,13 +840,13 @@ mod tests {
             .count()
     }
 
-    /// Y-03 regresyonu (uçtan uca): sayfa verisi yarıda kesilirse dönüşüm
-    /// hata döndürmeli, AMA yazıcıya giden akış yine de kapanış UEL'i ile
-    /// bitmeli. Aksi hâlde yazıcı QPDL dilinde, yarım bir bant kaydını
-    /// bekler hâlde asılı kalır.
+    /// Y-03 regression, end to end: truncated page data must make the
+    /// conversion return an error, BUT the stream sent to the printer must
+    /// still end with the closing UEL. Otherwise the printer is left in the
+    /// QPDL language, waiting for the rest of a half-written band record.
     #[test]
     fn test_closing_uel_written_on_truncated_page_data() {
-        let stream = v3_stream(2); // 4 satır x 4 bayt = 16 bayt gerekiyordu
+        let stream = v3_stream(2); // 4 lines x 4 bytes = 16 bytes were required
         let mut out: Vec<u8> = Vec::new();
         let err = process_cups_raster_to_spl(
             &no_args(),
@@ -847,20 +854,21 @@ mod tests {
             &mut out,
             &current_service_date(),
         )
-        .expect_err("kısa sayfa verisi hata döndürmeliydi");
+        .expect_err("short page data should have returned an error");
         assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
         assert!(
             out.ends_with(spl::PJL_END),
-            "hata yolu akışı kapanış UEL'i olmadan bıraktı"
+            "the error path left the stream without its closing UEL"
         );
         assert_eq!(count_uel(&out), 2);
     }
 
-    /// Y-03 regresyonu: sayfa başlığı doğrulamadan geçemezse de aynı garanti.
+    /// Y-03 regression: the same guarantee when a page header fails
+    /// validation.
     #[test]
     fn test_closing_uel_written_on_invalid_page_header() {
         let mut stream = v3_stream(16);
-        // bytes_per_line'ı 0 yap: validate_page_header reddedecek.
+        // Set bytes_per_line to 0, which validate_page_header must reject.
         stream[4 + 392..4 + 396].copy_from_slice(&0u32.to_be_bytes());
 
         let mut out: Vec<u8> = Vec::new();
@@ -870,13 +878,13 @@ mod tests {
             &mut out,
             &current_service_date(),
         )
-        .expect_err("geçersiz başlık hata döndürmeliydi");
+        .expect_err("an invalid header should have returned an error");
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(out.ends_with(spl::PJL_END));
     }
 
-    /// Akışta hiç sayfa yoksa da iş kapatılmalı: `begin_job` yazıcıyı çoktan
-    /// QPDL diline sokmuştur.
+    /// A stream with no pages at all must still close the job: `begin_job`
+    /// has already put the printer into the QPDL language.
     #[test]
     fn test_closing_uel_written_when_stream_has_no_pages() {
         let mut out: Vec<u8> = Vec::new();
@@ -886,13 +894,13 @@ mod tests {
             &mut out,
             &current_service_date(),
         )
-        .expect("sayfasız akış hata değil, uyarı üretmeli");
+        .expect("a page-less stream must warn rather than fail");
         assert!(out.ends_with(spl::PJL_END));
         assert_eq!(count_uel(&out), 2);
     }
 
-    /// Başarılı akış tam olarak iki UEL içermeli: `Drop`, açıkça kapatılmış
-    /// bir işe üçüncü bir UEL eklememelidir.
+    /// A successful stream carries exactly two UELs: `Drop` must not append a
+    /// third one to a job that was closed explicitly.
     #[test]
     fn test_successful_stream_has_exactly_one_uel_pair() {
         let mut out: Vec<u8> = Vec::new();
@@ -902,21 +910,22 @@ mod tests {
             &mut out,
             &current_service_date(),
         )
-        .expect("geçerli akış başarılı olmalı");
+        .expect("a valid stream must succeed");
         assert!(out.starts_with(spl::PJL_UEL));
         assert!(out.ends_with(spl::PJL_END));
-        assert_eq!(count_uel(&out), 2, "fazladan UEL yazıldı");
+        assert_eq!(count_uel(&out), 2, "an extra UEL was written");
     }
 
-    /// Y-01 regresyonu (uçtan uca): sıkıştırılmış v2 akışı, aynı içeriğin
-    /// sıkıştırmasız v3 hâliyle BİRE BİR aynı SPL çıktısını üretmeli.
+    /// Y-01 regression, end to end: a compressed v2 stream must produce
+    /// BYTE-IDENTICAL SPL output to the uncompressed v3 form of the same
+    /// content.
     ///
-    /// Eskiden v2 sayfa verisi ham piksel sanılıyordu ve yazıcıya çöp bir
-    /// sayfa gidiyordu. Bu test, `CupsLineDecoder`'ın araya girdiğini ve
-    /// akışın sürümünün çıktıyı hiç etkilemediğini sabitler.
+    /// v2 page data used to be taken for raw pixels, and a garbage page went to
+    /// the printer. This test pins that `CupsLineDecoder` sits in the path and
+    /// that the stream version has no effect on the output at all.
     #[test]
     fn test_v2_and_v3_streams_produce_identical_output() {
-        // 4 bayt/satır, 3 satır: 0xAA 0xAA 0xAA 0x55 / 0x00 x4 / 0xFF x4
+        // 4 bytes per line, 3 lines: 0xAA 0xAA 0xAA 0x55 / 0x00 x4 / 0xFF x4
         let pixels: [&[u8]; 3] = [
             &[0xAA, 0xAA, 0xAA, 0x55],
             &[0x00, 0x00, 0x00, 0x00],
@@ -946,11 +955,11 @@ mod tests {
             v3.extend_from_slice(line);
         }
 
-        // Aynı içeriğin CUPS satır-RLE karşılığı.
+        // The same content as CUPS line-RLE.
         let mut v2 = b"RaS2".to_vec();
         v2.extend_from_slice(&hdr);
         v2.extend_from_slice(&[0x00, 0x02, 0xAA, 0x00, 0x55]); // 0xAA x3, 0x55 x1
-        v2.extend_from_slice(&[0x00, 0x80]); // satır sonuna kadar boş (K => 0x00)
+        v2.extend_from_slice(&[0x00, 0x80]); // blank to end of line (K => 0x00)
         v2.extend_from_slice(&[0x00, 0x03, 0xFF]); // 0xFF x4
 
         let mut out_v3: Vec<u8> = Vec::new();
@@ -960,7 +969,7 @@ mod tests {
             &mut out_v3,
             &current_service_date(),
         )
-        .expect("v3 akışı işlenmeli");
+        .expect("the v3 stream must be processed");
         let mut out_v2: Vec<u8> = Vec::new();
         process_cups_raster_to_spl(
             &no_args(),
@@ -968,32 +977,31 @@ mod tests {
             &mut out_v2,
             &current_service_date(),
         )
-        .expect("v2 akışı işlenmeli");
+        .expect("the v2 stream must be processed");
 
         assert!(!out_v3.is_empty());
-        assert_eq!(out_v2, out_v3, "v2 ve v3 çıktıları ayrıştı");
+        assert_eq!(out_v2, out_v3, "the v2 and v3 outputs diverged");
     }
 
-    /// `validate_page_header` sınırları, PPD'nin sunduğu HER seçeneği
-    /// kapsamalı.
+    /// `validate_page_header`'s limits must cover EVERY option the PPD offers.
     ///
-    /// Sabitler PPD'den elle türetilmişti ve aradaki bağ yalnızca bir
-    /// yorumdu: PPD'ye daha büyük bir kağıt ya da daha yüksek bir çözünürlük
-    /// eklenirse, sabitleri güncellemeyi unutmak meşru işlerin sessizce
-    /// reddedilmesine yol açardı. Bu test o bağı zorunlu kılar.
+    /// The constants were derived from the PPD by hand and the link between
+    /// them was only a comment: add a larger sheet or a higher resolution to
+    /// the PPD, forget to update the constants, and legitimate jobs would be
+    /// refused in silence. This test makes that link mandatory.
     #[test]
     fn test_limits_cover_every_ppd_option() {
         for (x_dpi, y_dpi) in ppd_resolutions() {
             assert!(
                 SplResolution::pair_is_supported(x_dpi, y_dpi),
-                "PPD {}x{} DPI sunuyor ama filtre bu çifti desteklemiyor",
+                "the PPD offers {}x{} DPI but the filter does not support that pair",
                 x_dpi,
                 y_dpi
             );
             for dpi in [x_dpi, y_dpi] {
                 assert!(
                     dpi <= MAX_DPI,
-                    "PPD {} DPI sunuyor ama MAX_DPI = {}; sabiti güncelleyin",
+                    "the PPD offers {} DPI but MAX_DPI = {}; update the constant",
                     dpi,
                     MAX_DPI
                 );
@@ -1004,17 +1012,17 @@ mod tests {
             for pt in [w, h] {
                 assert!(
                     pt <= MAX_POINTS,
-                    "PPD '{}' {} pt kağıt sunuyor ama MAX_POINTS = {}; sabiti güncelleyin",
+                    "the PPD offers '{}' at {} pt but MAX_POINTS = {}; update the constant",
                     name,
                     pt,
                     MAX_POINTS
                 );
-                // En büyük kağıt en yüksek çözünürlükte satır/sütun
-                // sınırlarına da sığmalı.
+                // The largest sheet at the highest resolution must also fit
+                // the line and column limits.
                 let pixels = (pt as u64 * MAX_DPI as u64).div_ceil(72);
                 assert!(
                     pixels <= MAX_LINES as u64,
-                    "{} pt @ {} DPI = {} satır, MAX_LINES = {}",
+                    "{} pt @ {} DPI = {} lines, MAX_LINES = {}",
                     pt,
                     MAX_DPI,
                     pixels,
@@ -1022,7 +1030,7 @@ mod tests {
                 );
                 assert!(
                     pixels.div_ceil(8) <= MAX_BYTES_PER_LINE as u64,
-                    "{} pt @ {} DPI = {} bayt/satır, MAX_BYTES_PER_LINE = {}",
+                    "{} pt @ {} DPI = {} bytes per line, MAX_BYTES_PER_LINE = {}",
                     pt,
                     MAX_DPI,
                     pixels.div_ceil(8),
@@ -1035,19 +1043,20 @@ mod tests {
     #[test]
     fn test_validate_page_header_rejects_line_wider_than_page() {
         let mut header = valid_header();
-        header.page_size_points = [297, 420]; // desteklenen A6
+        header.page_size_points = [297, 420]; // A6, a supported size
         header.width = 4960;
-        header.bytes_per_line = 620; // cupsWidth ile tutarlı, sayfayla değil
-        let err = validate_page_header(&header).expect_err("dar sayfa reddedilmeliydi");
+        header.bytes_per_line = 620; // consistent with cupsWidth, not with the page
+        let err =
+            validate_page_header(&header).expect_err("a too-narrow page should have been refused");
         assert!(
             err.to_string().contains("does not fit the page width"),
-            "hata nedeni açıklanmalı: {}",
+            "the reason must be explained: {}",
             err
         );
     }
 
-    /// Gerçek bir tam genişlik A4 sayfası (595 pt @ 600 DPI = 620 B/satır)
-    /// reddedilmemeli — aşırı düzeltme kontrolü.
+    /// A real full-width A4 page (595 pt @ 600 DPI = 620 bytes per line) must
+    /// not be refused — the over-correction check.
     #[test]
     fn test_validate_page_header_accepts_full_width_a4() {
         let mut header = valid_header();
@@ -1056,59 +1065,61 @@ mod tests {
         assert!(validate_page_header(&header).is_ok());
     }
 
-    /// Yuvarlama payı: 1 baytlık aşım hoş görülür, 2 bayt reddedilir.
+    /// Rounding slack: one byte of overshoot is tolerated, two are refused.
     #[test]
     fn test_validate_page_header_line_width_slack_is_one_byte() {
-        // 595 pt @ 600 DPI => 4960 px => 620 bayt bant genişliği.
+        // 595 pt @ 600 DPI => 4960 px => a 620-byte band width.
         let mut ok = valid_header();
-        ok.width = 4968; // 621 bayt
+        ok.width = 4968; // 621 bytes
         ok.bytes_per_line = 621;
         assert!(
             validate_page_header(&ok).is_ok(),
-            "1 baytlık pay kabul edilmeli"
+            "one byte of slack must be accepted"
         );
 
         let mut too_wide = valid_header();
-        too_wide.width = 4976; // 622 bayt
+        too_wide.width = 4976; // 622 bytes
         too_wide.bytes_per_line = 622;
         assert!(
             validate_page_header(&too_wide).is_err(),
-            "2 bayt aşım reddedilmeli"
+            "two bytes of overshoot must be refused"
         );
     }
 
-    /// D-02: `cupsHeight` sayfanın fiziksel yüksekliğine sığmalı — D-01'in
-    /// dikey karşılığı. Yamadan önce bu başlık kabul ediliyordu.
+    /// D-02: `cupsHeight` must fit the sheet's physical height — the vertical
+    /// counterpart of D-01. Before the fix this header was accepted.
     #[test]
     fn test_validate_page_header_rejects_page_taller_than_paper() {
         let mut header = valid_header();
-        header.page_size_points = [297, 420]; // desteklenen A6
-        header.height = 4_000; // MAX_LINES içinde, ama A6'ya sığmıyor
-        let err = validate_page_header(&header).expect_err("uzun sayfa reddedilmeliydi");
+        header.page_size_points = [297, 420]; // A6, a supported size
+        header.height = 4_000; // within MAX_LINES, but taller than A6
+        let err =
+            validate_page_header(&header).expect_err("a too-tall page should have been refused");
         assert!(
             err.to_string().contains("does not fit the page height"),
-            "hata nedeni açıklanmalı: {}",
+            "the reason must be explained: {}",
             err
         );
 
-        // Normal boyutlu bir A4 sayfasında da aşım yakalanmalı: 842 pt @ 600
-        // DPI = 7017 satır; raster bunun altında kalmalıdır.
+        // The overshoot must also be caught on an ordinary A4 page: 842 pt @
+        // 600 DPI = 7017 lines, and the raster has to stay under that.
         let mut a4 = valid_header();
         a4.height = 24_000;
         assert!(
             validate_page_header(&a4).is_err(),
-            "A4'e sığmayan yükseklik reddedilmeli"
+            "a height that does not fit A4 must be refused"
         );
     }
 
-    /// Aşırı düzeltme kontrolü: gerçek `cupsfilter` çıktısının ürettiği
-    /// yükseklikler reddedilmemeli. Değerler, ppd/samsung-ml2160.ppd ile
-    /// `cupsfilter -m application/vnd.cups-raster` çalıştırılarak ölçüldü;
-    /// hepsi fiziksel sınırın altında kalır çünkü `*ImageableArea` kenar
-    /// boşlukları (12 pt üst + 12 pt alt) düşülür.
+    /// The over-correction check: heights that real `cupsfilter` output
+    /// produces must not be refused. The values were measured by running
+    /// `cupsfilter -m application/vnd.cups-raster` with
+    /// ppd/samsung-ml2160.ppd; every one stays under the physical limit
+    /// because the `*ImageableArea` margins (12 pt top + 12 pt bottom) are
+    /// subtracted.
     #[test]
     fn test_validate_page_header_accepts_real_cupsfilter_heights() {
-        // (sayfa_genişliği_pt, sayfa_yüksekliği_pt, y_dpi, ölçülen cupsHeight)
+        // (page_width_pt, page_height_pt, y_dpi, measured cupsHeight)
         let measured = [
             (595u32, 842u32, 300u32, 3408u32), // A4
             (595, 842, 600, 6817),
@@ -1122,12 +1133,12 @@ mod tests {
         for (width_pt, height_pt, ydpi, cups_height) in measured {
             let mut h = valid_header();
             h.page_size_points = [width_pt, height_pt];
-            // Bu tablodaki ölçümler simetrik çözünürlüklerden alındı.
+            // The measurements in this table came from symmetric resolutions.
             h.hw_resolution = [ydpi, ydpi];
             h.height = cups_height;
             assert!(
                 validate_page_header(&h).is_ok(),
-                "gerçek cupsfilter çıktısı reddedildi: {}x{} pt @ {} DPI => {} satır",
+                "real cupsfilter output was refused: {}x{} pt @ {} DPI => {} lines",
                 width_pt,
                 height_pt,
                 ydpi,
@@ -1136,10 +1147,11 @@ mod tests {
         }
     }
 
-    /// Yuvarlama payı: 8 satırlık aşım hoş görülür, fazlası reddedilir.
+    /// Rounding slack: eight lines of overshoot are tolerated, more are
+    /// refused.
     #[test]
     fn test_validate_page_header_height_slack_is_eight_lines() {
-        // 842 pt @ 600 DPI => ceil(842 * 600 / 72) = 7017 satır.
+        // 842 pt @ 600 DPI => ceil(842 * 600 / 72) = 7017 lines.
         let exact = compute_page_height_lines(842, 600);
         assert_eq!(exact, 7017);
 
@@ -1147,48 +1159,48 @@ mod tests {
         ok.height = exact + 8;
         assert!(
             validate_page_header(&ok).is_ok(),
-            "8 satırlık pay kabul edilmeli"
+            "eight lines of slack must be accepted"
         );
 
         let mut too_tall = valid_header();
         too_tall.height = exact + 9;
         assert!(
             validate_page_header(&too_tall).is_err(),
-            "9 satır aşım reddedilmeli"
+            "nine lines of overshoot must be refused"
         );
     }
 
-    /// D-06: sert kenar boşluğu SpliX ile birebir aynı hesaplanmalı.
+    /// D-06: the hard margin must be computed exactly as SpliX computes it.
     ///
     /// SpliX compress.cpp: `((ceil(marginPt * dpi / 72) + 7) & ~7) / 8`.
-    /// 8'e YUKARI hizalama önemli: 12 pt @600 DPI = 100 piksel, hizalanınca
-    /// 104 piksel = 13 bayt olur; hizalamasız 12,5 bayt (kırpılınca 12) çıkar
-    /// ve bant bir bayt kayar.
+    /// Rounding UP to 8 matters: 12 pt @ 600 DPI is 100 pixels, which aligns to
+    /// 104 pixels = 13 bytes; without the alignment it is 12.5 bytes (12 once
+    /// truncated) and the band shifts by one byte.
     #[test]
     fn test_hard_margin_matches_splix_alignment() {
         assert_eq!(hard_margin_bytes(media::HARD_MARGIN_PT, 300), 7);
         assert_eq!(hard_margin_bytes(media::HARD_MARGIN_PT, 600), 14);
         assert_eq!(hard_margin_bytes(media::HARD_MARGIN_PT, 1200), 27);
 
-        // Bu projenin PPD'sindeki *ImageableArea sol kenar boşluğu: 12 pt.
+        // The *ImageableArea left margin in this project's PPD: 12 pt.
         assert_eq!(hard_margin_bytes(12.0, 600), 13);
         assert_eq!(hard_margin_bytes(12.0, 300), 7);
         assert_eq!(hard_margin_bytes(12.0, 1200), 25);
-        // Kenar boşluğu bildirilmemişse kaydırma da yok.
+        // No declared margin means no shift either.
         assert_eq!(hard_margin_bytes(0.0, 600), 0);
     }
 
-    /// D-06 regresyonu: yatay yerleşim ORTALAMA EKSİ SERT KENAR BOŞLUĞU
-    /// olmalıdır, yalnızca ortalama değil.
+    /// D-06 regression: horizontal placement must be CENTRING MINUS THE HARD
+    /// MARGIN, not centring alone.
     ///
-    /// Eskiden yalnızca `(bandWidthInB - lineSize) / 2` uygulanıyordu; A4 @600
-    /// DPI'da bu 12 baytlık (96 piksel ≈ 4 mm) bir sağa kayma demekti, çünkü
-    /// SpliX bandı doldururken `hardMarginXInB` (13 bayt) kadar ATLAR
-    /// (compress.cpp:227). Net ofset sıfırdır.
+    /// Only `(bandWidthInB - lineSize) / 2` used to be applied; on A4 @ 600 DPI
+    /// that meant a 12-byte (96 pixel, about 4 mm) shift to the right, because
+    /// SpliX SKIPS `hardMarginXInB` (13 bytes) while filling the band
+    /// (compress.cpp:227). The net offset is zero.
     #[test]
     fn test_band_placement_subtracts_hard_margin() {
-        // A4 @600 DPI, bu projenin PPD'sindeki gerçek sayılar:
-        // bant 620 B, CUPS satırı 595 B, sert kenar boşluğu 13 B.
+        // A4 @ 600 DPI, the real numbers from this project's PPD:
+        // a 620-byte band, a 595-byte CUPS line, a 13-byte hard margin.
         let a4 = band_placement(620, 595, hard_margin_bytes(12.0, 600)).unwrap();
         assert_eq!(
             a4,
@@ -1196,21 +1208,22 @@ mod tests {
                 dst_offset: 0,
                 src_skip: 1
             },
-            "ortalama (12 B) sert kenar boşluğunu (13 B) telafi etmeli"
+            "centring (12 B) must offset the hard margin (13 B)"
         );
 
-        // Regresyon çapası: sert kenar boşluğu düşülmezse eski, hatalı
-        // 12 baytlık kayma geri gelir.
+        // The regression anchor: without subtracting the hard margin, the old
+        // and wrong 12-byte shift comes back.
         assert_eq!(
             band_placement(620, 595, 0).unwrap(),
             BandPlacement {
                 dst_offset: 12,
                 src_skip: 0
             },
-            "kenar boşluğu yoksa davranış saf ortalamadır"
+            "with no margin the behaviour is plain centring"
         );
 
-        // Ortalama sert kenar boşluğundan BÜYÜKSE fark hedefe kalır.
+        // When centring is LARGER than the hard margin, the difference stays
+        // in the destination.
         assert_eq!(
             band_placement(620, 560, 13).unwrap(),
             BandPlacement {
@@ -1219,7 +1232,8 @@ mod tests {
             }
         );
 
-        // Bant satırdan darsa ortalama yoktur; kenar boşluğu satırdan atılır.
+        // A band narrower than the line cannot be centred; the margin is
+        // skipped out of the line instead.
         assert_eq!(
             band_placement(600, 620, 13).unwrap(),
             BandPlacement {
@@ -1228,15 +1242,15 @@ mod tests {
             }
         );
 
-        // Satırın tamamı atlanacaksa geometri tutarsızdır: sessizce kırpmak
-        // yerine reddedilir (eskiden `src_skip` 3'e kırpılıp tek baytlık,
-        // yani fiilen boş bir sayfa üretiliyordu).
+        // Skipping the whole line means the geometry is inconsistent: it is
+        // refused rather than silently clamped (`src_skip` used to be clamped
+        // to 3, producing a one-byte, effectively blank page).
         let err = band_placement(4, 4, 999)
-            .expect_err("satırdan geniş sert kenar boşluğu reddedilmeliydi");
+            .expect_err("a hard margin wider than the line should have been refused");
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("the hard margin"), "{}", err);
 
-        // Sınır: tam olarak bir bayt kalması hâlâ kabul edilir.
+        // The boundary: exactly one byte left over is still accepted.
         assert_eq!(
             band_placement(4, 4, 3).unwrap(),
             BandPlacement {
@@ -1246,49 +1260,50 @@ mod tests {
         );
     }
 
-    /// D-07: `Margins[0]` doğrulanmadığında `hard_margin_bytes` içindeki
-    /// `px + 7` toplaması taşıyordu — `overflow-checks` açık yapılarda iş
-    /// ortasında panik, sürüm yapılarında sessizce 0'a sarma. Sayfadan geniş
-    /// bir sol kenar boşluğu artık başlık doğrulamasında reddediliyor.
+    /// D-07: with `Margins[0]` unvalidated, the `px + 7` addition inside
+    /// `hard_margin_bytes` overflowed — a panic in the middle of a job where
+    /// `overflow-checks` is on, and a silent wrap to 0 in release builds. A
+    /// left margin wider than the page is now refused by header validation.
     #[test]
     fn test_validate_page_header_rejects_out_of_page_left_margin() {
         for margin in [595, 600, 300_000_000] {
             let mut header = valid_header();
             header.margins[0] = margin;
             let err = validate_page_header(&header)
-                .expect_err("sayfadan geniş sol kenar boşluğu reddedilmeliydi");
+                .expect_err("a left margin wider than the page should have been refused");
             assert!(
                 err.to_string().contains("invalid left margin"),
-                "{} pt için yanlış hata: {}",
+                "the wrong error for {} pt: {}",
                 margin,
                 err
             );
         }
 
-        // PPD'nin gerçek değeri (12 pt) ve sınırın hemen altı kabul edilmeli.
+        // The PPD's real value (12 pt) and just under the limit must both be
+        // accepted.
         for margin in [0, 12, 594] {
             let mut header = valid_header();
             header.margins[0] = margin;
             assert!(
                 validate_page_header(&header).is_ok(),
-                "{} pt kabul edilmeliydi",
+                "{} pt should have been accepted",
                 margin
             );
         }
     }
 
-    /// D-06 regresyonu (uçtan uca): raster içeriği, yazıcıya giden bant
-    /// tamponunda sert kenar boşluğu düşülmüş sütunda durmalı.
+    /// D-06 regression, end to end: raster content must land in the band
+    /// buffer sent to the printer at the column the hard margin leaves it in.
     ///
-    /// Gerçek A4 @600 DPI geometrisi kurulur (620 B bant, 595 B CUPS satırı,
-    /// `Margins[0] = 12 pt`) ve satırın 3. baytına bir işaret konur.
-    /// Beklenen sütun `3 - src_skip + dst_offset = 2`'dir; düzeltmeden önce
-    /// aynı bayt 15. sütuna (12 baytlık kayma + 3) yazılıyordu.
+    /// Real A4 @ 600 DPI geometry is set up (a 620-byte band, a 595-byte CUPS
+    /// line, `Margins[0] = 12 pt`) and a mark is placed in byte 3 of the line.
+    /// The expected column is `3 - src_skip + dst_offset = 2`; before the fix
+    /// the same byte was written to column 15 (a 12-byte shift plus 3).
     #[test]
     fn test_content_lands_at_hard_margin_corrected_column() {
         const MARKER_INDEX: usize = 3;
         let mut spec = RasterSpec::a4(600, 600, 8);
-        spec.width_px = 4760; // 595 B/satır: gerçek cupsfilter çıktısına eşit
+        spec.width_px = 4760; // 595 bytes per line, as real cupsfilter output has
         spec.margin_left_pt = 12; // PPD *ImageableArea: "12 12 583 830"
 
         let mut pattern = vec![0u8; 595];
@@ -1297,13 +1312,14 @@ mod tests {
 
         let out = run_filter(spec.build());
         let band = first_band_buffer(&out);
-        assert_eq!(band.len(), 620 * QPDL_BAND_HEIGHT, "bant tamponu boyutu");
+        assert_eq!(band.len(), 620 * QPDL_BAND_HEIGHT, "band buffer size");
 
         let columns = nonzero_columns_in_first_line(&band, QPDL_BAND_HEIGHT);
         assert_eq!(
             columns,
             vec![1],
-            "işaret baytı yanlış sütunda; 15 ise sert kenar boşluğu düşülmüyor"
+            "the marker byte is in the wrong column; 15 means the hard margin is not
+             being subtracted"
         );
     }
 
@@ -1325,12 +1341,12 @@ mod tests {
         assert_eq!(columns, vec![MARKER_INDEX - 2]);
     }
 
-    /// Yatay ve dikey eksen AYNI origin'i kullanmalı.
+    /// The horizontal and vertical axes must use the SAME origin.
     ///
-    /// Hatanın özü buydu: dikeyde hiçbir kaydırma yokken yatayda 12 baytlık
-    /// bir kaydırma vardı. SpliX'te iki eksenin de neti sıfırdır (ortalama
-    /// eksi sert kenar boşluğu). Bu test ilk raster satırının bant tamponunun
-    /// hem 0. satırında hem 0. sütununda başladığını sabitler.
+    /// This was the heart of the bug: nothing shifted vertically while the
+    /// horizontal axis shifted by 12 bytes. In SpliX the net offset is zero on
+    /// both axes (centring minus the hard margin). This test pins the first
+    /// raster line to line 0 and column 0 of the band buffer.
     #[test]
     fn test_horizontal_and_vertical_origins_agree() {
         let mut spec = RasterSpec::a4(600, 600, 8);
@@ -1344,45 +1360,48 @@ mod tests {
         let out = run_filter(spec.build());
         let band = first_band_buffer(&out);
 
-        // Sütun 0, satır 0: içerik bandın sol-üst köşesinden başlar.
-        assert_eq!(band[0], 0xFF, "içerik bandın (0,0) köşesinde başlamalı");
+        // Column 0, line 0: the content starts at the band's top-left corner.
+        assert_eq!(
+            band[0], 0xFF,
+            "content must start at the band's (0,0) corner"
+        );
         assert_eq!(
             nonzero_columns_in_first_line(&band, QPDL_BAND_HEIGHT),
             vec![0]
         );
     }
 
-    /// Yükseklik sınırı dikey çözünürlüğe bağlı olmalı: `compute_page_height_lines`
-    /// `hw_resolution[1]`'i alır, `[0]`'ı değil. 1200x600 desteklenen bir mod
-    /// olduğundan iki eksenin birbirinden bağımsız kullanılması gerekir.
+    /// The height limit must follow the vertical resolution:
+    /// `compute_page_height_lines` takes `hw_resolution[1]`, not `[0]`. 1200x600
+    /// is a supported mode, so the two axes have to be used independently.
     #[test]
     fn test_page_height_lines_uses_vertical_resolution() {
         assert_eq!(compute_page_height_lines(842, 600), 7017);
         assert_eq!(compute_page_height_lines(842, 300), 3509);
         assert_eq!(compute_page_height_lines(842, 1200), 14034);
 
-        // Sınır gerçekten çözünürlükle ölçekleniyor: 600 DPI'da geçerli olan
-        // bir yükseklik, aynı kağıtta 300 DPI'da reddedilmeli.
+        // The limit really does scale with resolution: a height that is valid
+        // at 600 DPI must be refused at 300 DPI on the same sheet.
         let mut h300 = valid_header();
         h300.hw_resolution = [300, 300];
         h300.width = 2480;
         h300.bytes_per_line = 310;
-        h300.height = 6817; // 600 DPI'nın satır sayısı
+        h300.height = 6817; // the line count of 600 DPI
         assert!(
             validate_page_header(&h300).is_err(),
-            "300 DPI'da 600 DPI'nın satır sayısı kabul edilmemeli"
+            "600 DPI line counts must not be accepted at 300 DPI"
         );
 
-        h300.height = 3408; // 300 DPI için gerçek cupsfilter değeri
+        h300.height = 3408; // the real cupsfilter value for 300 DPI
         assert!(validate_page_header(&h300).is_ok());
     }
 
-    /// Asimetrik çözünürlük (`1200x600dpi`) DESTEKLENEN gerçek bir QPDL
-    /// modudur — SpliX de aynı seçeneği ml2010/ml2015/ml1640/ml2510/ml2525
-    /// PPD'lerinde sunar — ve reddedilmemelidir.
+    /// An asymmetric resolution (`1200x600dpi`) is a real, SUPPORTED QPDL mode
+    /// — SpliX offers the same option in its ml2010/ml2015/ml1640/ml2510/ml2525
+    /// PPDs — and must not be refused.
     #[test]
     fn test_validate_page_header_accepts_asymmetric_resolution() {
-        // A4 @ 1200x600: cupsfilter'ın gerçekte ürettiği değerler.
+        // A4 @ 1200x600: the values cupsfilter actually produces.
         let mut h = valid_header();
         h.hw_resolution = [1200, 600];
         h.width = 9517;
@@ -1390,17 +1409,17 @@ mod tests {
         h.height = 6817;
         assert!(
             validate_page_header(&h).is_ok(),
-            "1200x600dpi gerçek bir QPDL modu, reddedilmemeli: {:?}",
+            "1200x600dpi is a real QPDL mode and must not be refused: {:?}",
             validate_page_header(&h).err()
         );
     }
 
-    /// PPD'nin sunduğu her çözünürlük, filtre tarafından da kabul edilmeli:
-    /// aksi hâlde kullanıcı sebebi belirsiz bir "filter failed" görür.
+    /// Every resolution the PPD offers must be accepted by the filter as well;
+    /// otherwise the user sees an unexplained "filter failed".
     #[test]
     fn test_filter_accepts_every_ppd_resolution() {
         for (x, y) in ppd_resolutions() {
-            // O çözünürlükte A4 için tutarlı bir başlık kur.
+            // Build a header consistent with A4 at that resolution.
             let mut h = valid_header();
             h.hw_resolution = [x, y];
             h.bytes_per_line = (595 * x).div_ceil(72).div_ceil(8);
@@ -1408,7 +1427,7 @@ mod tests {
             h.height = (842 * y).div_ceil(72);
             assert!(
                 validate_page_header(&h).is_ok(),
-                "PPD {}x{} DPI sunuyor ama filtre reddediyor: {:?}",
+                "the PPD offers {}x{} DPI but the filter refuses it: {:?}",
                 x,
                 y,
                 validate_page_header(&h).err()
@@ -1416,10 +1435,11 @@ mod tests {
         }
     }
 
-    /// D-04 regresyonu: `cupsColorOrder` artık denetleniyor.
+    /// D-04 regression: `cupsColorOrder` is checked now.
     #[test]
     fn test_validate_page_header_checks_color_order() {
-        // 1-bit tek kanallı veride üç dizilim de eşdeğerdir, üçü de kabul.
+        // For 1-bit single-channel data all three orders are equivalent, so
+        // all three are accepted.
         for order in [
             CupsColorOrder::Chunked,
             CupsColorOrder::Banded,
@@ -1429,7 +1449,7 @@ mod tests {
             header.color_order = order;
             assert!(
                 validate_page_header(&header).is_ok(),
-                "{:?} kabul edilmeliydi",
+                "{:?} should have been accepted",
                 order
             );
         }
@@ -1438,27 +1458,26 @@ mod tests {
         unknown.color_order = CupsColorOrder::Unknown(99);
         assert!(
             validate_page_header(&unknown).is_err(),
-            "tanınmayan dizilim reddedilmeli"
+            "an unrecognised order must be refused"
         );
     }
 
-    /// Belirtilen sayıda küçük, geçerli sayfadan oluşan bir V3 akışı üretir.
+    /// Builds a V3 stream of the requested number of small, valid pages.
     fn v3_multipage_stream(pages: u32) -> Vec<u8> {
         v3_multipage_stream_with_copies(pages, 0)
     }
 
-    /// `v3_multipage_stream`'in, sayfa başlığındaki `cupsNumCopies` alanını da
-    /// ayarlayan sürümü; yaprak (sayfa x kopya) bütçesini sınamak için.
+    /// The variant of `v3_multipage_stream` that also sets `cupsNumCopies` in
+    /// the page header, for exercising the impression (page x copies) budget.
     fn v3_multipage_stream_with_copies(pages: u32, copies: u32) -> Vec<u8> {
         let mut page = vec![0u8; 1796];
         {
             let mut put = |off: usize, val: u32| {
                 page[off..off + 4].copy_from_slice(&val.to_be_bytes());
             };
-            // Desteklenen en küçük kâğıt ve çözünürlük (A6 @ 300 DPI), fakat
-            // yalnızca 8x1 piksellik geçerli bir raster bölgesi. Sayfa başına
-            // bant tamponu yaklaşık 10 KiB'ta kalır; 5.000 sayfalık sınır
-            // testi yine hızlıdır.
+            // The smallest supported sheet and resolution (A6 @ 300 DPI), but
+            // only an 8x1 pixel valid raster area. The band buffer stays around
+            // 10 KiB per page, which keeps the 5,000-page limit test fast.
             put(276, 300); // hw_resolution
             put(280, 300);
             put(352, 297); // page_size_points: A6
@@ -1474,12 +1493,12 @@ mod tests {
         let mut stream = b"RaS3".to_vec();
         for _ in 0..pages {
             stream.extend_from_slice(&page);
-            stream.push(0u8); // 1 satır x 1 bayt
+            stream.push(0u8); // 1 line x 1 byte
         }
         stream
     }
 
-    /// D-04 regresyonu: sayfa sayısının bir üst sınırı olmalı.
+    /// D-04 regression: the page count must have an upper bound.
     #[test]
     fn test_page_count_is_capped() {
         let mut out: Vec<u8> = Vec::new();
@@ -1489,28 +1508,30 @@ mod tests {
             &mut out,
             &current_service_date(),
         )
-        .expect_err("sayfa sınırı aşılınca hata beklenir");
+        .expect_err("exceeding the page limit must be an error");
         assert!(
             err.to_string().contains("exceeded the page limit"),
             "{}",
             err
         );
-        // Sınır aşılsa bile iş düzgün kapatılmalı (Y-03 garantisi).
+        // Even over the limit the job must be closed properly (the Y-03
+        // guarantee).
         assert!(out.ends_with(spl::PJL_END));
     }
 
-    /// Ham raster hacmi bütçesi uygulanmalı ve tam sınırda kabul etmeli.
+    /// The raw raster volume budget must be enforced, and must accept the
+    /// limit exactly.
     #[test]
     fn test_job_raster_byte_budget_is_enforced() {
         let mut budget = JobBudget::default();
         budget
             .account_page(MAX_JOB_RASTER_BYTES, 1)
-            .expect("bütçenin tamamı kabul edilmeli");
+            .expect("the whole budget must be accepted");
         assert_eq!(budget.raster_bytes, MAX_JOB_RASTER_BYTES);
 
         let err = budget
             .account_page(1, 1)
-            .expect_err("bütçeyi bir bayt aşmak hata vermeli");
+            .expect_err("one byte over the budget must fail");
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(
             err.to_string().contains("exceeded the raster volume limit"),
@@ -1518,8 +1539,8 @@ mod tests {
             err
         );
 
-        // Sarma yerine doyma: sınırlar ileride büyütülse bile taşma sessizce
-        // bütçeyi sıfırlamamalı.
+        // Saturate rather than wrap: even if the limits are raised later, an
+        // overflow must not silently reset the budget.
         let mut huge = JobBudget {
             pages: 0,
             raster_bytes: u64::MAX - 1,
@@ -1529,32 +1550,35 @@ mod tests {
         assert_eq!(huge.raster_bytes, u64::MAX);
     }
 
-    /// BULGU 2: sayfa sınırı ile kopya sınırının ÇARPIMI sınırsız olmamalı.
+    /// FINDING 2: the PRODUCT of the page limit and the copy limit must not be
+    /// unbounded.
     ///
-    /// Bu testin varlık nedeni, iki sınırın ayrı ayrı "makul" görünürken
-    /// birlikte 4.995.000 yaprağa (eski değerlerle) izin vermesiydi. Sayaç
-    /// yaprak cinsindendir; sayfa sayısı tek başına anlamlı bir tavan değil.
+    /// This test exists because the two limits looked "reasonable" separately
+    /// while together they allowed 4,995,000 impressions with the old values.
+    /// The counter is in impressions; a page count alone is not a meaningful
+    /// ceiling.
     #[test]
     fn test_page_and_copy_limits_cannot_multiply_without_bound() {
         let unbounded_product = MAX_PAGES_PER_JOB as u64 * MAX_REALISTIC_COPIES as u64;
         assert!(
             MAX_JOB_IMPRESSIONS < unbounded_product,
-            "yaprak sınırı, sayfa x kopya çarpımından ({}) küçük olmalı; \
-             aksi hâlde hiçbir şey sınırlamıyor demektir",
+            "the impression limit must be smaller than the page x copies product \
+             ({}); otherwise nothing is limiting anything",
             unbounded_product
         );
 
-        // Azami kopya sayısıyla, yaprak bütçesinin izin verdiği sayfa sayısı.
+        // At the maximum copy count, the number of pages the impression
+        // budget allows.
         let mut budget = JobBudget::default();
         let allowed = MAX_JOB_IMPRESSIONS / MAX_REALISTIC_COPIES as u64;
         for page in 1..=allowed {
             budget
                 .account_page(1, MAX_REALISTIC_COPIES)
-                .unwrap_or_else(|e| panic!("sayfa {} reddedilmemeliydi: {}", page, e));
+                .unwrap_or_else(|e| panic!("page {} should not have been refused: {}", page, e));
         }
         let err = budget
             .account_page(1, MAX_REALISTIC_COPIES)
-            .expect_err("yaprak sınırı aşılınca hata beklenir");
+            .expect_err("exceeding the impression limit must be an error");
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(
             err.to_string().contains("exceeded the sheet limit"),
@@ -1563,40 +1587,47 @@ mod tests {
         );
     }
 
-    /// Yaprak bütçesi tam sınırda kabul etmeli, bir yaprak fazlasında reddetmeli.
+    /// The impression budget must accept the limit exactly and refuse one
+    /// impression more.
     #[test]
     fn test_impression_budget_is_not_off_by_one() {
         let mut budget = JobBudget::default();
         budget
             .account_page(1, u16::try_from(MAX_JOB_IMPRESSIONS).unwrap())
-            .expect("tam sınır kadar yaprak kabul edilmeli");
+            .expect("impressions up to the exact limit must be accepted");
         assert_eq!(budget.impressions, MAX_JOB_IMPRESSIONS);
         assert!(budget.account_page(1, 1).is_err());
     }
 
-    /// Bütçe, HAM `num_copies` ile değil `sanitize_copies`'ten geçmiş değerle
-    /// saymalı: yazıcıya gitmeyen kopyalar bütçeyi tüketmemeli, ama 65536 gibi
-    /// bir değer de "0 kopya" sayılıp bütçeden kaçmamalı.
+    /// The budget must count the value that came through `sanitize_copies`,
+    /// not the RAW `num_copies`: copies that never reach the printer must not
+    /// consume budget, and a value such as 65536 must not be counted as
+    /// "0 copies" and escape the budget either.
     #[test]
     fn test_impression_budget_counts_sanitized_copies() {
         let mut budget = JobBudget::default();
-        // Eski `as u16` davranışında bu 0 ediyordu; şimdi 999 sayılmalı.
+        // Under the old `as u16` behaviour this became 0; it must count 999.
         budget.account_page(1, sanitize_copies(65_536)).unwrap();
         assert_eq!(budget.impressions, MAX_REALISTIC_COPIES as u64);
 
         let mut zero = JobBudget::default();
         zero.account_page(1, sanitize_copies(0)).unwrap();
-        assert_eq!(zero.impressions, 1, "0 kopya en az 1 yaprak sayılmalı");
+        assert_eq!(
+            zero.impressions, 1,
+            "0 copies must count as at least 1 impression"
+        );
     }
 
-    /// Yaprak sınırı uçtan uca da uygulanmalı ve iş yine düzgün kapanmalı.
+    /// The impression limit must be enforced end to end, and the job must
+    /// still close properly.
     #[test]
     fn test_impression_limit_is_enforced_end_to_end() {
-        // Her sayfa azami kopyayla: sınır sayfa sayısından çok önce dolar.
+        // Every page at the maximum copy count: the limit fills long before
+        // the page count does.
         let pages = (MAX_JOB_IMPRESSIONS / MAX_REALISTIC_COPIES as u64) as u32 + 1;
         assert!(
             pages < MAX_PAGES_PER_JOB,
-            "sayfa sınırı önce devreye girmemeli"
+            "the page limit must not bind first"
         );
 
         let mut out: Vec<u8> = Vec::new();
@@ -1609,38 +1640,38 @@ mod tests {
             &mut out,
             &current_service_date(),
         )
-        .expect_err("yaprak sınırı aşılınca hata beklenir");
+        .expect_err("exceeding the impression limit must be an error");
         assert!(
             err.to_string().contains("exceeded the sheet limit"),
             "{}",
             err
         );
-        // Sınır aşılsa bile iş düzgün kapatılmalı (Y-03 garantisi).
+        // Even over the limit the job must be closed properly (the Y-03
+        // guarantee).
         assert!(out.ends_with(spl::PJL_END));
     }
 
-    /// Bütçe, normal çözünürlüklü işlerin davranışını DEĞİŞTİRMEMELİ:
-    /// `MAX_PAGES_PER_JOB` kadar A4 @600 DPI sayfa bütçenin altında kalmalı.
+    /// The budget must NOT change the behaviour of ordinary-resolution jobs:
+    /// `MAX_PAGES_PER_JOB` A4 pages at 600 DPI have to stay under it.
     #[test]
     fn test_job_budget_does_not_bind_for_600dpi_pages_within_page_limit() {
-        // Görüntülenebilir alanı değil daha büyük olan fiziksel A4 geometrisini
-        // kullan; böylece sınır farklı cups-filters yuvarlamalarına da dayanır.
+        // Use the larger physical A4 geometry rather than the imageable area,
+        // so the limit survives different cups-filters rounding as well.
         let a4_600 = compute_page_width_pixels(595, 600).div_ceil(8) as u64
             * compute_page_height_lines(842, 600) as u64;
         let worst = a4_600 * MAX_PAGES_PER_JOB as u64;
         assert!(
             worst < MAX_JOB_RASTER_BYTES,
-            "{} A4@600DPI sayfa ({} bayt) bütçeyi ({}) aşmamalı",
+            "{} A4 pages at 600 DPI ({} bytes) must not exceed the budget ({})",
             MAX_PAGES_PER_JOB,
             worst,
             MAX_JOB_RASTER_BYTES
         );
     }
 
-    /// Doğrulayıcının kabul ettiği en büyük ham raster geometrisi:
-    /// Legal @1200 DPI ile D-01/D-02 yuvarlama payları. Bilinmeyen ölçüler
-    /// artık kabul edilmediğinden global `MAX_POINTS` değeri erişilebilir bir
-    /// sayfa geometrisi değildir.
+    /// The largest raw raster geometry the validator accepts: Legal @ 1200 DPI
+    /// plus the D-01/D-02 rounding slack. Unknown sizes are no longer accepted,
+    /// so the global `MAX_POINTS` value is not a reachable page geometry.
     fn largest_accepted_page_geometry() -> (u64, u64) {
         let bytes_per_line = compute_page_width_pixels(612, 1200).div_ceil(8) as u64
             + LINE_OVERSHOOT_SLACK_BYTES as u64;
@@ -1649,42 +1680,42 @@ mod tests {
         (bytes_per_line * lines, lines)
     }
 
-    /// ...ama en büyük kabul edilebilir sayfada GERÇEKTEN devreye girmeli,
-    /// yoksa sayfa sınırının çözünürlük körlüğü kapanmamış olur.
+    /// ...but on the largest acceptable page it must REALLY bind, otherwise
+    /// the page limit's blindness to resolution has not been closed.
     #[test]
     fn test_job_budget_binds_before_page_limit_at_max_page_size() {
         let (max_page, _) = largest_accepted_page_geometry();
         let pages_allowed = MAX_JOB_RASTER_BYTES / max_page;
         assert!(
             pages_allowed > 0,
-            "bütçe tek bir azami sayfayı bile reddediyor"
+            "the budget refuses even a single maximum-sized page"
         );
         assert!(
             pages_allowed < MAX_PAGES_PER_JOB as u64,
-            "azami boyutlu sayfalarda bütçe sayfa sınırından önce devreye girmeli \
-             (izin verilen: {}, sayfa sınırı: {})",
+            "on maximum-sized pages the budget must bind before the page limit \
+             (allowed: {}, page limit: {})",
             pages_allowed,
             MAX_PAGES_PER_JOB
         );
         assert_eq!(
             pages_allowed + 1,
             401,
-            "kaynak bütçesi açıklamasındaki ilk reddedilen sayfa değişti"
+            "the first refused page quoted in the resource-budget commentary changed"
         );
     }
 
-    /// BULGU 1: bütçe, en kötü durumdaki CPU süresini de sınırlamalı.
+    /// FINDING 1: the budget must bound worst-case CPU time as well.
     ///
-    /// Bu sınır bayt cinsinden olduğu için CPU süresini ancak sıkıştırıcının
-    /// ölçülen hızı üzerinden dolaylı olarak bağlar. Aşağıdaki değer bu
-    /// makinede, release derlemesinde, gerçek bant boyutunda (346.752 bayt)
-    /// ölçüldü: sıkıştırılamaz gürültü ~6,65 MB/s (sıfır dolu bantta ~166 MB/s,
-    /// yani en iyi ile en kötü arasında ~25 kat var).
+    /// The limit is in bytes, so it binds CPU time only indirectly, through the
+    /// compressor's measured throughput. The value below was measured on this
+    /// machine, in a release build, at the real band size (346,752 bytes):
+    /// incompressible noise runs at about 6.65 MB/s (a zero-filled band runs at
+    /// about 166 MB/s, so there is a factor of about 25 between best and worst).
     ///
-    /// Testin amacı bir hız ölçmek değil — makineden makineye değişir — bütçe
-    /// büyütüldüğünde bunun CPU tarafındaki bedelini görünür kılmak: filtre
-    /// CUPS kuyruğunu tek iş parçacığıyla işlediği için bu süre boyunca
-    /// sıradaki tüm işler bekler.
+    /// The point is not to measure a speed — that varies from machine to
+    /// machine — but to make the CPU-side cost of raising the budget visible:
+    /// the filter processes the CUPS queue on a single thread, so everything
+    /// behind it waits for this long.
     const MEASURED_WORST_CASE_COMPRESS_BPS: u64 = 6_650_000;
 
     #[test]
@@ -1692,25 +1723,26 @@ mod tests {
         let worst_case_seconds = MAX_JOB_RASTER_BYTES / MEASURED_WORST_CASE_COMPRESS_BPS;
         assert!(
             worst_case_seconds <= 30 * 60,
-            "en kötü durumda tek bir iş kuyruğu {} saniye bloke ediyor; \
-             MAX_JOB_RASTER_BYTES ({}) düşürülmeli",
+            "in the worst case a single job blocks the queue for {} seconds; \
+             MAX_JOB_RASTER_BYTES ({}) should be lowered",
             worst_case_seconds,
             MAX_JOB_RASTER_BYTES
         );
     }
 
-    /// BULGU 1'in asıl çekirdeği: bütçe ÇÖZÜLMÜŞ raster hacmini sayar, girdi
-    /// hacmini değil — ve CUPS Raster v2'nin satır-RLE'si arada çok büyük bir
-    /// genişleme sağlar. Desteklenen en büyük geometride yaklaşık 0,74 MiB'lik
-    /// tamamen beyaz bir akış 8 GiB'tan fazla raster işi doğurabilir.
+    /// The core of FINDING 1: the budget counts DECODED raster volume, not
+    /// input volume — and the line-RLE of CUPS Raster v2 provides an enormous
+    /// expansion in between. At the largest supported geometry an all-white
+    /// stream of about 0.74 MiB can produce more than 8 GiB of raster work.
     ///
-    /// Bu yüzden "girdi küçükse iş de küçüktür" varsayımı yapılamaz; tek gerçek
-    /// savunma tavanın kendisidir. Test, o tavanın saldırganın gönderebileceği
-    /// bayt sayısıyla DEĞİL, yalnızca sabitle sınırlı kaldığını pinliyor.
+    /// So "a small input means a small job" cannot be assumed; the ceiling
+    /// itself is the only real defence. This test pins that the ceiling is
+    /// bounded by the constant alone, NOT by how many bytes an attacker can
+    /// send.
     #[test]
     fn test_compressed_input_cannot_amplify_past_the_raster_budget() {
-        // Tek bir v2 satır kaydı 2 bayttır ([tekrar][0x80 = satır sonuna kadar
-        // boşalt]) ve 256 satıra kadar üretir; sayfa başlığı 1796 bayt.
+        // One v2 line record is 2 bytes ([repeat][0x80 = blank to end of line])
+        // and produces up to 256 lines; the page header is 1796 bytes.
         let (page, lines) = largest_accepted_page_geometry();
         let input_per_page = 1796 + 2 * lines.div_ceil(256);
         let pages = MAX_JOB_RASTER_BYTES / page + 1;
@@ -1718,11 +1750,12 @@ mod tests {
 
         assert!(
             attacker_bytes < MAX_JOB_RASTER_BYTES / 1000,
-            "genişleme oranı bu testin varsayımından düşük; ölçümü gözden geçirin"
+            "the expansion ratio is lower than this test assumes; revisit the
+             measurement"
         );
 
-        // Asıl garanti: girdi ne kadar küçük olursa olsun, işlenen hacim
-        // bütçeyi aşamaz.
+        // The real guarantee: however small the input, the processed volume
+        // cannot exceed the budget.
         let mut budget = JobBudget::default();
         let mut processed = 0u64;
         for _ in 0..pages {
@@ -1733,13 +1766,13 @@ mod tests {
         }
         assert!(
             processed <= MAX_JOB_RASTER_BYTES,
-            "işlenen hacim ({}) bütçeyi ({}) aştı",
+            "the processed volume ({}) exceeded the budget ({})",
             processed,
             MAX_JOB_RASTER_BYTES
         );
     }
 
-    /// Sınırın tam üstündeki bir iş sorunsuz işlenmeli.
+    /// A job exactly at the limit must be processed without complaint.
     #[test]
     fn test_page_count_limit_is_not_off_by_one() {
         let mut out: Vec<u8> = Vec::new();
@@ -1749,7 +1782,7 @@ mod tests {
             &mut out,
             &current_service_date(),
         )
-        .expect("tam sınır kadar sayfa kabul edilmeli");
+        .expect("pages up to the exact limit must be accepted");
         assert!(out.ends_with(spl::PJL_END));
     }
 
@@ -1774,7 +1807,7 @@ mod tests {
     }
 
     // ======================================================================
-    // Şerit yüksekliği: SpliX compress.cpp `_compressBandedPage`
+    // Band height: SpliX compress.cpp `_compressBandedPage`
     //   if (xResolution == 300 && yResolution == 300) bandHeight /= 2;
     // ======================================================================
 
@@ -1788,19 +1821,19 @@ mod tests {
         assert_eq!(
             with(300, 300),
             64,
-            "300x300 DPI'da şerit yüksekliği 64 olmalı"
+            "the band height must be 64 at 300x300 DPI"
         );
         assert_eq!(with(600, 600), QPDL_BAND_HEIGHT);
         assert_eq!(with(1200, 1200), QPDL_BAND_HEIGHT);
-        // Kural İKİ eksenin de 300 olmasını istiyor; asimetrik modlar 128'de kalır.
+        // The rule requires BOTH axes to be 300; asymmetric modes stay at 128.
         assert_eq!(with(1200, 600), QPDL_BAND_HEIGHT);
         assert_eq!(with(300, 600), QPDL_BAND_HEIGHT);
         assert_eq!(with(600, 300), QPDL_BAND_HEIGHT);
     }
 
-    /// Uçtan uca: 300 DPI bir iş, tele GERÇEKTEN 64 satırlık şerit kayıtları
-    /// yazmalı. Regresyon değeri buradadır — `band_height_for` doğru olsa bile
-    /// çağrı yerinde kullanılmazsa bu test kırılır.
+    /// End to end: a 300 DPI job must REALLY write 64-line band records to the
+    /// wire. That is where the regression value is — this test breaks if
+    /// `band_height_for` is right but is not used at the call site.
     #[test]
     fn test_300dpi_job_writes_64_line_band_records() {
         let spec = RasterSpec::a4(300, 300, 200);
@@ -1810,10 +1843,10 @@ mod tests {
         assert_eq!(
             bands.len(),
             200_usize.div_ceil(64),
-            "200 satır / 64 = 4 şerit"
+            "200 lines / 64 = 4 bands"
         );
         for (i, b) in bands.iter().enumerate() {
-            assert_eq!(b.height_lines, 64, "şerit {} yüksekliği 64 olmalı", i);
+            assert_eq!(b.height_lines, 64, "band {} must be 64 lines high", i);
             assert_eq!(b.index, i as u8);
         }
     }
@@ -1826,12 +1859,13 @@ mod tests {
         assert_eq!(
             bands.len(),
             200_usize.div_ceil(128),
-            "200 satır / 128 = 2 şerit"
+            "200 lines / 128 = 2 bands"
         );
         assert!(bands.iter().all(|b| b.height_lines == 128));
     }
 
-    /// Asimetrik `1200x600dpi` modu 300 DPI kuralına takılmamalı.
+    /// The asymmetric `1200x600dpi` mode must not be caught by the 300 DPI
+    /// rule.
     #[test]
     fn test_asymmetric_1200x600_keeps_128_line_bands() {
         let spec = RasterSpec::a4(1200, 600, 200);
@@ -1839,8 +1873,8 @@ mod tests {
         assert!(pages[0].bands.iter().all(|b| b.height_lines == 128));
     }
 
-    /// PPD'nin sunduğu HER çözünürlük için şerit yüksekliği SpliX kuralıyla
-    /// aynı olmalı. PPD'ye yeni bir çözünürlük eklenirse bu test onu kapsar.
+    /// For EVERY resolution the PPD offers, the band height must match SpliX's
+    /// rule. A new resolution added to the PPD is covered by this test.
     #[test]
     fn test_band_height_matches_splix_rule_for_every_ppd_resolution() {
         for (x, y) in ppd_resolutions() {
@@ -1850,7 +1884,7 @@ mod tests {
             assert_eq!(
                 band_height_for(h.hw_resolution),
                 expected,
-                "PPD {}x{} DPI sunuyor; SpliX kuralına göre şerit yüksekliği {} olmalı",
+                "the PPD offers {}x{} DPI; by SpliX's rule the band height must be {}",
                 x,
                 y,
                 expected
@@ -1859,7 +1893,7 @@ mod tests {
     }
 
     // ======================================================================
-    // Duplex / tumble: SpliX request.cpp (mod seçimi) + qpdl.cpp (baytlar)
+    // Duplex / tumble: SpliX request.cpp (mode selection) + qpdl.cpp (bytes)
     // ======================================================================
 
     #[test]
@@ -1874,16 +1908,16 @@ mod tests {
         assert_eq!(
             mode(false, true),
             SplDuplex::Simplex,
-            "Duplex kapalıyken Tumble yok sayılır"
+            "with duplex off, tumble is ignored"
         );
-        // ML-2160 ailesi `*QPDL ManualDuplex: "On"` bildirdiği için sonuç
-        // daima Manual* olmalı; otomatik LongEdge/ShortEdge bu ailede yanlış.
+        // The ML-2160 family declares `*QPDL ManualDuplex: "On"`, so the result
+        // must always be Manual*; automatic LongEdge/ShortEdge is wrong here.
         assert_eq!(mode(true, false), SplDuplex::ManualLongEdge);
         assert_eq!(mode(true, true), SplDuplex::ManualShortEdge);
     }
 
-    /// Tek taraflı işlerde tumble baytı her sayfada 0, duplex baytı 1 olmalı.
-    /// (SpliX: Simplex -> duplex = 1, tumble = 0.)
+    /// On one-sided jobs the tumble byte must be 0 and the duplex byte 1 on
+    /// every page. (SpliX: Simplex -> duplex = 1, tumble = 0.)
     #[test]
     fn test_simplex_pages_have_duplex_byte_one_and_no_tumble() {
         let mut spec = RasterSpec::a4(600, 600, 8);
@@ -1894,21 +1928,21 @@ mod tests {
             assert_eq!(
                 p.header[0xB],
                 1,
-                "sayfa {}: Simplex duplex baytı 1 olmalı",
+                "page {}: the Simplex duplex byte must be 1",
                 i + 1
             );
             assert_eq!(
                 p.header[0xC],
                 0,
-                "sayfa {}: Simplex tumble baytı 0 olmalı",
+                "page {}: the Simplex tumble byte must be 0",
                 i + 1
             );
         }
     }
 
-    /// Elle duplex'te tumble, SAYFA NUMARASININ paritesidir ve sayaç 1'den
-    /// başlar: tek numaralı sayfalarda 1, çift numaralılarda 0.
-    /// Eski kod burada koşulsuz 0 yazıyordu.
+    /// In manual duplex, tumble is the parity of the PAGE NUMBER, and the
+    /// counter starts at 1: 1 on odd pages, 0 on even ones. The old code wrote
+    /// an unconditional 0 here.
     #[test]
     fn test_manual_duplex_tumble_alternates_from_page_one() {
         let mut spec = RasterSpec::a4(600, 600, 8);
@@ -1920,14 +1954,17 @@ mod tests {
         assert_eq!(
             tumbles,
             vec![1, 0, 1, 0],
-            "tumble = pageNr % 2 (pageNr 1 tabanlı)"
+            "tumble = pageNr % 2 (pageNr is 1-based)"
         );
         for p in &pages {
-            assert_eq!(p.header[0xB], 0, "elle duplex'te duplex baytı 0 olmalı");
+            assert_eq!(
+                p.header[0xB], 0,
+                "in manual duplex the duplex byte must be 0"
+            );
         }
     }
 
-    /// Elle duplex PJL'de `DUPLEX=ON` değil `DUPLEX=MANUAL` demeli
+    /// Manual duplex must say `DUPLEX=MANUAL` in the PJL, not `DUPLEX=ON`
     /// (SpliX printer.cpp sendPJLHeader).
     #[test]
     fn test_manual_duplex_job_sends_pjl_duplex_manual() {
@@ -1939,7 +1976,7 @@ mod tests {
         assert!(pjl.contains("@PJL SET BINDING=LONGEDGE\n"), "PJL: {}", pjl);
         assert!(
             !pjl.contains("@PJL SET DUPLEX=ON"),
-            "elle duplex ON bildirmemeli: {}",
+            "manual duplex must not announce ON: {}",
             pjl
         );
     }
@@ -1955,9 +1992,9 @@ mod tests {
         assert!(pjl.contains("@PJL SET BINDING=SHORTEDGE\n"), "PJL: {}", pjl);
     }
 
-    /// CUPS raster başlığındaki `Tumble` alanı 368. baytta (cupsWidth'ten
-    /// hemen önce) okunmalı. Alan daha önce `turn_off` adıyla duruyordu ve
-    /// hiç kullanılmadığı için yanlış adlandırma fark edilmiyordu.
+    /// The `Tumble` field of the CUPS raster header must be read at byte 368,
+    /// immediately before cupsWidth. The field used to be named `turn_off`, and
+    /// because nothing ever used it the misnaming went unnoticed.
     #[test]
     fn test_tumble_is_parsed_from_offset_368() {
         let mut spec = RasterSpec::a4(600, 600, 8);
@@ -1965,17 +2002,17 @@ mod tests {
         spec.tumble = true;
         let stream = spec.build();
         let header = PageHeader::parse(&stream[4..4 + 1796], CupsRasterVersion::V3Be).unwrap();
-        assert!(header.tumble, "368. bayttaki Tumble alanı okunmadı");
+        assert!(header.tumble, "the Tumble field at byte 368 was not read");
         assert!(header.duplex);
     }
 
     // ======================================================================
-    // Kağıt boyutu eşlemesi
+    // Paper size mapping
     // ======================================================================
 
-    /// PPD'nin sunduğu her kağıt boyutu, QPDL'nin doğru kağıt koduna
-    /// eşlenmeli. PPD ile tablo arasındaki her sapma, meşru bir işi reddeder;
-    /// bu test iki listeyi birlikte güncel tutar.
+    /// Every paper size the PPD offers must map to the right QPDL paper code.
+    /// Any divergence between the PPD and the table refuses a legitimate job;
+    /// this test keeps the two lists in step.
     #[test]
     fn test_every_ppd_paper_size_maps_to_its_qpdl_code() {
         use spl::SplPaperSize;
@@ -1993,7 +2030,7 @@ mod tests {
                 "EnvDL" => SplPaperSize::Dl,
                 "EnvC5" => SplPaperSize::C5,
                 "Folio" => SplPaperSize::Folio,
-                other => panic!("PPD'de tabloya eklenmemiş kağıt boyutu: {}", other),
+                other => panic!("a paper size in the PPD that the table lacks: {}", other),
             }
         };
 
@@ -2001,13 +2038,13 @@ mod tests {
         assert_eq!(
             papers.len(),
             11,
-            "PPD'den beklenen sayıda kağıt boyutu okunamadı"
+            "the expected number of paper sizes was not read from the PPD"
         );
         for (name, w, h) in papers {
             assert_eq!(
                 SplPaperSize::from_dimensions_pt_exact(w, h),
                 Some(expected(&name)),
-                "PPD '{}' = {}x{} pt, ama kesin eşleme başka bir kod veriyor",
+                "the PPD says '{}' = {}x{} pt, but the exact mapping gives another code",
                 name,
                 w,
                 h
@@ -2015,9 +2052,9 @@ mod tests {
         }
     }
 
-    /// Folio 210x330 mm'dir (595x935 pt). 612x936 pt olan 8.5x13 inç ölçüsü
-    /// Adobe adlandırmasında FanFoldGermanLegal'dir ve Folio değildir;
-    /// `cupstestppd` de PPD'yi tam bu gerekçeyle uyarıyordu.
+    /// Folio is 210x330 mm (595x935 pt). The 8.5x13 inch size, 612x936 pt, is
+    /// FanFoldGermanLegal in Adobe's naming and is not Folio; `cupstestppd`
+    /// warned about the PPD for exactly this reason.
     #[test]
     fn test_folio_is_f4_not_fanfold_german_legal() {
         use spl::SplPaperSize;
@@ -2029,21 +2066,21 @@ mod tests {
             SplPaperSize::from_dimensions_pt_exact(935, 595),
             Some(SplPaperSize::Folio)
         );
-        // 8.5x13 inç Folio'ya ya da sessizce A4'e eşlenmemeli.
+        // 8.5x13 inch must map neither to Folio nor silently to A4.
         assert_eq!(SplPaperSize::from_dimensions_pt_exact(612, 936), None);
     }
 
     // ======================================================================
-    // Kağıt kaynağı (PPD *InputSlot -> CUPS MediaPosition -> QPDL 0x9 baytı)
+    // Paper source (PPD *InputSlot -> CUPS MediaPosition -> QPDL byte 0x9)
     // ======================================================================
 
-    /// PPD'nin sunduğu her kağıt kaynağı, QPDL'nin doğru kaynak koduna
-    /// eşlenmeli.
+    /// Every paper source the PPD offers must map to the right QPDL source
+    /// code.
     ///
-    /// PPD `*InputSlot` seçeneklerini doğrudan QPDL kodlarıyla
-    /// numaralandırıyor (`<</MediaPosition 1>>` = Auto). Bağ bir yorum
-    /// olarak kalırsa, PPD'ye QPDL kodu olmayan bir değer eklendiğinde
-    /// (eskiden Auto = 0 idi) seçenek sessizce Auto'ya düşer.
+    /// The PPD numbers its `*InputSlot` options with the QPDL codes directly
+    /// (`<</MediaPosition 1>>` = Auto). If that link stays a comment, adding a
+    /// value with no QPDL code to the PPD (Auto used to be 0) makes the option
+    /// fall back to Auto in silence.
     #[test]
     fn test_every_ppd_input_slot_maps_to_its_qpdl_code() {
         use spl::SplPaperSource;
@@ -2057,7 +2094,7 @@ mod tests {
                 "Multi" => SplPaperSource::Multi,
                 "Upper" => SplPaperSource::Upper,
                 "Lower" => SplPaperSource::Lower,
-                other => panic!("PPD'de tabloya eklenmemiş kağıt kaynağı: {}", other),
+                other => panic!("a paper source in the PPD that the table lacks: {}", other),
             }
         };
 
@@ -2066,24 +2103,24 @@ mod tests {
             let Some(rest) = line.strip_prefix("*InputSlot ") else {
                 continue;
             };
-            let (name, code) = rest.split_once(':').expect("bozuk *InputSlot satırı");
+            let (name, code) = rest.split_once(':').expect("malformed *InputSlot line");
             let name = name.split('/').next().unwrap().trim();
             // "<</MediaPosition 2>>setpagedevice" -> 2
             let pos: u32 = code
                 .split("MediaPosition")
                 .nth(1)
-                .expect("MediaPosition yok")
+                .expect("no MediaPosition")
                 .trim_start()
                 .split(|c: char| !c.is_ascii_digit())
                 .next()
                 .unwrap()
                 .parse()
-                .expect("MediaPosition sayı değil");
+                .expect("MediaPosition is not a number");
 
             assert_eq!(
                 SplPaperSource::from_media_position(pos),
                 Some(expected(name)),
-                "PPD '{}' = MediaPosition {}, ama filtre başka bir koda eşliyor",
+                "the PPD says '{}' = MediaPosition {}, but the filter maps another code",
                 name,
                 pos
             );
@@ -2091,12 +2128,12 @@ mod tests {
         }
         assert_eq!(
             checked, 2,
-            "PPD'den beklenen sayıda kağıt kaynağı okunamadı"
+            "the expected number of paper sources was not read from the PPD"
         );
     }
 
-    /// Uçtan uca: "Manual Feeder" seçimi QPDL sayfa başlığının 0x9 baytına
-    /// ulaşmalı. Yamadan önce bu bayt koşulsuz 1 (Auto) idi.
+    /// End to end: choosing "Manual Feeder" must reach byte 0x9 of the QPDL
+    /// page header. Before the fix that byte was an unconditional 1 (Auto).
     #[test]
     fn test_input_slot_reaches_qpdl_page_header() {
         for (media_position, expected) in [(1u32, 1u8), (2, 2), (0, 1)] {
@@ -2105,14 +2142,14 @@ mod tests {
             let pages = parse_spl(&run_filter(spec.build()));
             assert_eq!(
                 pages[0].header[0x9], expected,
-                "MediaPosition {} -> QPDL kaynak kodu {} olmalı",
+                "MediaPosition {} must give QPDL source code {}",
                 media_position, expected
             );
         }
     }
 
-    /// Tanınmayan bir `MediaPosition` sessizce yanlış bir koda dönüşmemeli;
-    /// Auto'ya düşmeli.
+    /// An unrecognised `MediaPosition` must not turn silently into the wrong
+    /// code; it falls back to Auto.
     #[test]
     fn test_unknown_media_position_falls_back_to_auto() {
         use spl::SplPaperSource;
@@ -2122,16 +2159,19 @@ mod tests {
         let mut spec = RasterSpec::a4(600, 600, 8);
         spec.media_position = 6;
         let pages = parse_spl(&run_filter(spec.build()));
-        assert_eq!(pages[0].header[0x9], 1, "tanınmayan kaynak Auto'ya düşmeli");
+        assert_eq!(
+            pages[0].header[0x9], 1,
+            "an unknown source must fall back to Auto"
+        );
     }
 
     // ======================================================================
-    // Kağıt türü (PPD *MediaType -> CUPS MediaType -> @PJL SET PAPERTYPE)
+    // Paper type (PPD *MediaType -> CUPS MediaType -> @PJL SET PAPERTYPE)
     // ======================================================================
 
-    /// PPD'nin sunduğu HER kağıt türü anahtarı, filtre tarafından da
-    /// tanınmalı. Aksi hâlde kullanıcının seçimi sessizce `OFF`'a düşer ve
-    /// zarf/etiket düz kağıt füzer ayarlarıyla basılır.
+    /// EVERY media-type keyword the PPD offers must be recognised by the
+    /// filter too. Otherwise the user's choice falls back to `OFF` in silence
+    /// and an envelope or label is printed with plain-paper fuser settings.
     #[test]
     fn test_every_ppd_media_type_is_accepted_by_the_filter() {
         let ppd = ppd_text();
@@ -2141,21 +2181,22 @@ mod tests {
             let Some(rest) = line.strip_prefix("*MediaType ") else {
                 continue;
             };
-            let (name, code) = rest.split_once(':').expect("bozuk *MediaType satırı");
+            let (name, code) = rest.split_once(':').expect("malformed *MediaType line");
             let name = name.split('/').next().unwrap().trim();
 
             assert_eq!(
                 spl::pjl_paper_type(name),
                 Some(name),
-                "PPD '{}' sunuyor ama filtrenin PJL sözlüğünde yok",
+                "the PPD offers '{}' but it is not in the filter's PJL vocabulary",
                 name
             );
-            // Seçim raster başlığına ulaşmalı: PostScript kodu MediaType
-            // dizesini anahtarın KENDİSİYLE ayarlamalı, aksi hâlde filtre
-            // farklı bir değer görür.
+            // The choice must reach the raster header: the PostScript code has
+            // to set the MediaType string to the keyword ITSELF, or the filter
+            // sees a different value.
             assert!(
                 code.contains(&format!("MediaType({})", name)),
-                "PPD '{}' seçimi raster başlığına aynı anahtarla ulaşmıyor: {}",
+                "the PPD choice '{}' does not reach the raster header under the same \
+                 keyword: {}",
                 name,
                 line
             );
@@ -2164,12 +2205,12 @@ mod tests {
         assert_eq!(
             checked,
             spl::PJL_PAPER_TYPES.len(),
-            "PPD, yazıcının PJL sözlüğündeki türlerin tamamını sunmuyor"
+            "the PPD does not offer every type in the printer's PJL vocabulary"
         );
     }
 
-    /// Uçtan uca: seçilen kağıt türü PJL başlığına ulaşmalı. Yamadan önce
-    /// burada her zaman `PAPERTYPE=OFF` yazıyordu.
+    /// End to end: the selected media type must reach the PJL header. Before
+    /// the fix this always said `PAPERTYPE=OFF`.
     #[test]
     fn test_media_type_reaches_pjl_papertype() {
         for media_type in ["ENV", "LABEL", "THICK", "OFF"] {
@@ -2179,16 +2220,16 @@ mod tests {
             let pjl = String::from_utf8_lossy(&out[..out.len().min(512)]).into_owned();
             assert!(
                 pjl.contains(&format!("@PJL SET PAPERTYPE={}\n", media_type)),
-                "{} PJL'e ulaşmadı: {}",
+                "{} did not reach the PJL: {}",
                 media_type,
                 pjl
             );
         }
     }
 
-    /// Tanınmayan ya da boş bir `MediaType` güvenli varsayılana düşmeli ve
-    /// asla ham olarak PJL satırına yazılmamalı (satır tırnaksızdır: bir
-    /// boşluk ya da CR/LF komutu bozardı).
+    /// An unrecognised or empty `MediaType` must fall back to the safe default
+    /// and must never be written raw into the PJL line (the line is unquoted: a
+    /// space or a CR/LF would corrupt the command).
     #[test]
     fn test_unknown_media_type_falls_back_to_papertype_off() {
         for media_type in ["", "Envelope", "Plain", "EVIL VALUE"] {
@@ -2198,21 +2239,21 @@ mod tests {
             let pjl = String::from_utf8_lossy(&out[..out.len().min(512)]).into_owned();
             assert!(
                 pjl.contains("@PJL SET PAPERTYPE=OFF\n"),
-                "{:?} için OFF'a düşülmedi: {}",
+                "{:?} did not fall back to OFF: {}",
                 media_type,
                 pjl
             );
             assert!(
                 !pjl.contains("PAPERTYPE=EVIL"),
-                "güvenilmez değer PJL satırına sızdı: {}",
+                "an untrusted value leaked into the PJL line: {}",
                 pjl
             );
         }
     }
 
-    /// PPD varsayılanları filtrenin varsayılanlarıyla uyuşmalı: PPD
-    /// `*DefaultMediaType: OFF` / `*DefaultInputSlot: Auto` diyorsa, hiçbir
-    /// seçim yapılmamış bir iş de aynı sonucu üretmeli.
+    /// The PPD's defaults must agree with the filter's: if the PPD says
+    /// `*DefaultMediaType: OFF` / `*DefaultInputSlot: Auto`, a job that selects
+    /// nothing has to produce the same result.
     #[test]
     fn test_ppd_defaults_match_filter_defaults() {
         let ppd = ppd_text();
