@@ -13,7 +13,7 @@
     "cupsPageSizeName": "Executive",
     "HWResolution": [600, 600],
     "PageSize": [522, 756],
-    "ImagingBoundingBox": [12.5, 12.5, 509.5, 743.5],
+    "ImagingBoundingBox": [12, 12, 509, 743],
     "Margins": [12, 12],
     "MediaPosition": 0,
     "NumCopies": 1,

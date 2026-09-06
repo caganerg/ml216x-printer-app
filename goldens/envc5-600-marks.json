@@ -13,7 +13,7 @@
     "cupsPageSizeName": "EnvC5",
     "HWResolution": [600, 600],
     "PageSize": [459, 649],
-    "ImagingBoundingBox": [12.5, 12.5, 446.5, 636.5],
+    "ImagingBoundingBox": [12, 12, 446, 636],
     "Margins": [12, 12],
     "MediaPosition": 0,
     "NumCopies": 1,

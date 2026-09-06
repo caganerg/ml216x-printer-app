@@ -2,15 +2,16 @@
 
 [workspace]
 # The 1.x filter stays the root package until P11 is green (decision Q-5);
-# the 2.0 crates are added here as they are written.
+# ordinary builds select the Printer Application.
 members = ["crates/spl2-core", "crates/pappl-sys", "crates/pappl", "crates/ml216x-printer-app"]
+
+default-members = ["crates/ml216x-printer-app"]
 
 [package]
 name = "samsung-2160-rust"
 version = "2.0.0-alpha"
 edition = "2021"
-authors = ["CUPS Raster Filter Developer"]
-description = "CUPS/PWG Raster Filter for Linux printing architecture"
+description = "Legacy CUPS raster front end and golden regression harness for the ML-216x driver"
 license = "GPL-2.0-only"
 
 [dependencies]

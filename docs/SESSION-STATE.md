@@ -145,17 +145,15 @@ stream, a single flipped bit, and the old resolution order.
    unpatched libpappl overflows the Q-1 follow-up flagged and reproduced both
    to a server crash — an 8-bit raster wider than the page, and an oversized
    `media-ready` list. Neither is fixable in this tree; the loopback-only bind
-   keeps them a local DoS. See `docs/SECURITY-REVIEW.md`, the P9 entry in
+   limits network exposure; a demonstrated crash does not bound their impact. See `docs/SECURITY-REVIEW.md`, the P9 entry in
    `docs/DECISIONS.md`, and `scripts/security-probe.py`. The one action left is
    filing the Debian bug, which needs a bug-tracker submission (maintainer).
 
-One smaller item found alongside, not blocking:
-
-* ~~`spl2-core` still emits Turkish diagnostics~~ — **done.** Every diagnostic
-  string in `spl2-core` is English, and the goldens are byte identical across
-  the change. The Turkish **comments** in `src/main.rs`, `src/golden.rs`, the
-  four `spl2-core` modules and `goldens/README.md` remain, and are left to a
-  dedicated pass.
+The diagnostic and commentary translation pass landed in `d3f6677`.
+The default build now selects the Printer Application; the legacy filter is
+an explicitly selected reference package. README installation and option
+examples use the IPP application. Q-12's stale margin gate and sidecar metadata
+are corrected without changing SPL output.
 
 An earlier note here claimed PAPPL's log lines drop the last character of
 formatted numbers ("4545" for 45453, "60x60dpi" for 600x600). That was wrong:
@@ -164,7 +162,7 @@ computed from the resolution was right, and the truncation was an artifact of
 how the output was captured, not a libpappl defect. Nothing to report.
 
 Keep the original filter in-tree until P11 passes; keep the PPD permanently.
-Hardware G-1 and open questions Q-12 and Q-13 remain outstanding; Q-14 to Q-17
+Hardware G-1 and open question Q-13 remain outstanding; Q-12 and Q-14 to Q-17
 are decided and implemented. No hardware print was performed.
 
 Checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
@@ -205,8 +203,8 @@ P11 or P12, they mean the rows above.
 `docs/GOLDEN-VALIDATION.md` and `CONTRIBUTING.md` for how output is verified
 and what blessing a golden requires, then `docs/MIGRATION-PLAN.md` §7 and §9
 for the target layout and the six corruption risks. The byte-for-byte
-behaviour itself lives in `src/main.rs` around `compute_page_width_pixels`,
-`hard_margin_bytes` and `band_placement`, and in `src/spl.rs` around
+behaviour itself lives in `crates/spl2-core/src/geometry.rs` around `compute_page_width_pixels`,
+`hard_margin_bytes` and `band_placement`, and in `crates/spl2-core/src/qpdl.rs` around
 `begin_job`, `begin_page`, `write_compressed_band`, `end_page` and `end_job`.
 The `v1.x-final` recovery anchor is an annotated tag: object `7c0cf2c`,
 commit `33d4ff2`, both present on `origin`.

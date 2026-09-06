@@ -31,7 +31,7 @@
 //! ## Refreshing
 //!
 //! ```text
-//! UPDATE_GOLDENS=1 cargo test golden
+//! UPDATE_GOLDENS=1 cargo test -p samsung-2160-rust golden
 //! ```
 //!
 //! Goldens may ONLY be refreshed together with a deliberate behaviour change;
@@ -162,7 +162,7 @@ const PPD_RESOLUTIONS: &[(u32, u32)] = &[(300, 300), (600, 600), (1200, 600), (1
 // --- Synthetic media: the ONLY way to reach `dst_offset > 0` ---------------
 //
 // `band_placement` positions the CUPS line as `centred - hard_margin`. Every
-// medium in this PPD has a 12 pt left margin, which at every supported
+// medium in this PPD has a 12.5 pt left margin, which at every supported
 // resolution makes the hard margin greater than or equal to the centring
 // offset, so `dst_offset` is 0 in every realistic case and only `src_skip`
 // varies. The positive branch is therefore unreachable from the shipped PPD —
@@ -567,7 +567,7 @@ fn build_sidecar(case: &Case) -> String {
     "cupsPageSizeName": "{page_size_name}",
     "HWResolution": [{res_x}, {res_y}],
     "PageSize": [{page_w}, {page_h}],
-    "ImagingBoundingBox": [{img_l}, {img_b}, {img_r}, {img_t}],
+    "ImagingBoundingBox": [{bbox_l}, {bbox_b}, {bbox_r}, {bbox_t}],
     "Margins": [{margin_l}, {margin_b}],
     "MediaPosition": {media_position},
     "NumCopies": {num_copies},
@@ -626,6 +626,10 @@ fn build_sidecar(case: &Case) -> String {
         img_b = img_b,
         img_r = img_r,
         img_t = img_t,
+        bbox_l = header.imaging_bounding_box[0],
+        bbox_b = header.imaging_bounding_box[1],
+        bbox_r = header.imaging_bounding_box[2],
+        bbox_t = header.imaging_bounding_box[3],
         margin_l = header.margins[0],
         margin_b = header.margins[1],
         media_position = header.media_position,
@@ -702,7 +706,7 @@ fn update_requested() -> bool {
 /// two produce the same bytes:
 ///
 /// ```text
-/// DUMP_GOLDEN_RASTER=/tmp/r cargo test golden
+/// DUMP_GOLDEN_RASTER=/tmp/r cargo test -p samsung-2160-rust golden
 /// ./target/release/rastertospl-rust 1 tester golden 1 '' /tmp/r/a4-600-marks.raster > /tmp/out.spl
 /// ```
 ///
@@ -731,7 +735,7 @@ fn compare_or_update(path: PathBuf, produced: &[u8], case_name: &str) {
 
     let expected = fs::read(&path).unwrap_or_else(|e| {
         panic!(
-            "could not read golden file: {} ({}). To produce it the first time: UPDATE_GOLDENS=1 cargo test golden",
+            "could not read golden file: {} ({}). To produce it the first time: UPDATE_GOLDENS=1 cargo test -p samsung-2160-rust golden",
             path.display(),
             e
         )
@@ -770,7 +774,7 @@ fn compare_or_update(path: PathBuf, produced: &[u8], case_name: &str) {
          produced   : {}\n\
          \n\
          The bytes going to the printer changed. If this is a DELIBERATE\n\
-         behaviour change, refresh with `UPDATE_GOLDENS=1 cargo test golden`\n\
+         behaviour change, refresh with `UPDATE_GOLDENS=1 cargo test -p samsung-2160-rust golden`\n\
          and include the diff in review; otherwise it is a regression.",
         case_name,
         path.display(),

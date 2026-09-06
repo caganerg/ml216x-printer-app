@@ -14,7 +14,7 @@ answered. **Q-7 exists and is decided:** it asked whether the .deb should link
 libpappl statically or dynamically, and it is answered under Q-7 below (and
 folded into Q-1, which settled the same matter). Counting the decided entries
 as ten and treating Q-7 as unaccounted for is the arithmetic slip this note
-exists to prevent. **Q-12** and **Q-13** were added later, by review and by
+exists to prevent. **Q-12 through Q-17** were added later, by review and by
 implementation rather than by the migration plan, and are the only entries
 outside the Q-1..Q-11 range.
 
@@ -370,7 +370,12 @@ text should say so when Q-12 is settled.
 
 ---
 
-## 2026-09-06 — Q-12 (OPEN): release gate G-1 still names the superseded 12 pt margin
+## 2026-09-06 — Q-12 (RESOLVED): release gate G-1 still names the superseded 12 pt margin
+
+**Resolution, 2026-09-06:** applied (a). G-1 names 12.5 pt (4.41 mm),
+and sidecars record the parsed integer `ImagingBoundingBox` while retaining
+fractional PPD values separately. Only JSON metadata and its checksums changed;
+all 32 SPL streams remain unchanged. The original review follows.
 
 Raised by a post-commit review of `eba7b09`, not by the maintainer. The 12.5 pt
 refresh marked sections 1-3 of `GOLDEN-VALIDATION.md` as historical but did not

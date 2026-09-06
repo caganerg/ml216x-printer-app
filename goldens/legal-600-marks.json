@@ -13,7 +13,7 @@
     "cupsPageSizeName": "Legal",
     "HWResolution": [600, 600],
     "PageSize": [612, 1008],
-    "ImagingBoundingBox": [12.5, 12.5, 599.5, 995.5],
+    "ImagingBoundingBox": [12, 12, 599, 995],
     "Margins": [12, 12],
     "MediaPosition": 0,
     "NumCopies": 1,

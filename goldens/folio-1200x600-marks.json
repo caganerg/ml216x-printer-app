@@ -13,7 +13,7 @@
     "cupsPageSizeName": "Folio",
     "HWResolution": [1200, 600],
     "PageSize": [595, 935],
-    "ImagingBoundingBox": [12.5, 12.5, 582.5, 922.5],
+    "ImagingBoundingBox": [12, 12, 582, 922],
     "Margins": [12, 12],
     "MediaPosition": 0,
     "NumCopies": 1,

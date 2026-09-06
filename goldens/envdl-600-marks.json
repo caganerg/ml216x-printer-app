@@ -13,7 +13,7 @@
     "cupsPageSizeName": "EnvDL",
     "HWResolution": [600, 600],
     "PageSize": [312, 624],
-    "ImagingBoundingBox": [12.5, 12.5, 299.5, 611.5],
+    "ImagingBoundingBox": [12, 12, 299, 611],
     "Margins": [12, 12],
     "MediaPosition": 0,
     "NumCopies": 1,

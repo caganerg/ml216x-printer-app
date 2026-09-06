@@ -13,7 +13,7 @@
     "cupsPageSizeName": "B5",
     "HWResolution": [600, 600],
     "PageSize": [516, 729],
-    "ImagingBoundingBox": [12.5, 12.5, 503.5, 716.5],
+    "ImagingBoundingBox": [12, 12, 503, 716],
     "Margins": [12, 12],
     "MediaPosition": 0,
     "NumCopies": 1,

@@ -35,17 +35,17 @@ is ~16 MB).
 ## Usage
 
 ```sh
-# Compare (the default; on every `cargo test` run)
-cargo test golden
+# Compare (the default; on every `cargo test --workspace` run)
+cargo test -p samsung-2160-rust golden
 
 # Refresh AFTER a deliberate behaviour change
-UPDATE_GOLDENS=1 cargo test golden
+UPDATE_GOLDENS=1 cargo test -p samsung-2160-rust golden
 
-# Verify the committed bytes
-sha256sum -c SHA256SUMS
+# Verify the committed bytes (from the repository root)
+(cd goldens && sha256sum -c SHA256SUMS)
 
 # Export the inputs (for manual inspection / comparison with the installed binary)
-DUMP_GOLDEN_RASTER=/tmp/r cargo test golden
+DUMP_GOLDEN_RASTER=/tmp/r cargo test -p samsung-2160-rust golden
 ```
 
 Every diff in a `.spl` file means **the bytes going to the printer changed**.
@@ -84,7 +84,7 @@ below.
 `synth-a4-600-dst14` and `synth-a4-600-dst94` are **fabricated geometries: no
 real printer reports these imageable areas.** They exist because
 `band_placement` positions the CUPS line at `centred - hard_margin`, and every
-medium in this PPD has a 12 pt left margin — which at every supported
+medium in this PPD has a 12.5 pt left margin — which at every supported
 resolution makes the hard margin at least as large as the centring offset. So
 `dst_offset` is 0 in every realistic case, only `src_skip` varies, and the
 positive branch has no golden at all.

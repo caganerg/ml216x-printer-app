@@ -17,7 +17,7 @@ the rules below exist because of that one fact.
    description of any FFI change.
 3. **Small, reviewable commits.** Do not refactor unrelated code in a change
    that also alters behaviour.
-4. `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` must
+4. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all --check` must
    pass.
 5. **No `unwrap()`, `expect()` or `panic!()` on any path reachable from a C
    callback.** Unwinding across `extern "C"` is undefined behaviour. Callbacks
@@ -28,7 +28,7 @@ the rules below exist because of that one fact.
 ## The bless discipline
 
 `goldens/` holds 32 frozen SPL2 streams and their sidecars.
-`cargo test golden` compares against them; `UPDATE_GOLDENS=1 cargo test golden`
+`cargo test -p samsung-2160-rust golden` compares against them; `UPDATE_GOLDENS=1 cargo test -p samsung-2160-rust golden`
 overwrites them. **Refreshing — "blessing" — a golden is a reviewed act, never
 a way to make a red build green.**
 

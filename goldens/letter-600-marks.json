@@ -13,7 +13,7 @@
     "cupsPageSizeName": "Letter",
     "HWResolution": [600, 600],
     "PageSize": [612, 792],
-    "ImagingBoundingBox": [12.5, 12.5, 599.5, 779.5],
+    "ImagingBoundingBox": [12, 12, 599, 779],
     "Margins": [12, 12],
     "MediaPosition": 0,
     "NumCopies": 1,

@@ -13,7 +13,7 @@
     "cupsPageSizeName": "A4",
     "HWResolution": [1200, 1200],
     "PageSize": [595, 842],
-    "ImagingBoundingBox": [12.5, 12.5, 582.5, 829.5],
+    "ImagingBoundingBox": [12, 12, 582, 829],
     "Margins": [12, 12],
     "MediaPosition": 0,
     "NumCopies": 1,
