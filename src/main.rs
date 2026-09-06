@@ -560,7 +560,7 @@ mod tests {
             let err = validate_page_header(&header)
                 .expect_err("PPD dışındaki çözünürlük reddedilmeliydi");
             assert!(
-                err.to_string().contains("Desteklenmeyen çözünürlük"),
+                err.to_string().contains("unsupported resolution"),
                 "{}x{} için yanlış hata: {}",
                 resolution[0],
                 resolution[1],
@@ -576,7 +576,7 @@ mod tests {
         let err = validate_page_header(&header)
             .expect_err("QPDL kodu olmayan kâğıt ölçüsü reddedilmeliydi");
         assert!(
-            err.to_string().contains("Desteklenmeyen kâğıt ölçüsü"),
+            err.to_string().contains("unsupported paper size"),
             "{}",
             err
         );
@@ -1038,7 +1038,7 @@ mod tests {
         header.bytes_per_line = 620; // cupsWidth ile tutarlı, sayfayla değil
         let err = validate_page_header(&header).expect_err("dar sayfa reddedilmeliydi");
         assert!(
-            err.to_string().contains("sayfa genişliğine sığmıyor"),
+            err.to_string().contains("does not fit the page width"),
             "hata nedeni açıklanmalı: {}",
             err
         );
@@ -1084,7 +1084,7 @@ mod tests {
         header.height = 4_000; // MAX_LINES içinde, ama A6'ya sığmıyor
         let err = validate_page_header(&header).expect_err("uzun sayfa reddedilmeliydi");
         assert!(
-            err.to_string().contains("sayfa yüksekliğine sığmıyor"),
+            err.to_string().contains("does not fit the page height"),
             "hata nedeni açıklanmalı: {}",
             err
         );
@@ -1232,7 +1232,7 @@ mod tests {
         let err = band_placement(4, 4, 999)
             .expect_err("satırdan geniş sert kenar boşluğu reddedilmeliydi");
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-        assert!(err.to_string().contains("Sert kenar boşluğu"), "{}", err);
+        assert!(err.to_string().contains("the hard margin"), "{}", err);
 
         // Sınır: tam olarak bir bayt kalması hâlâ kabul edilir.
         assert_eq!(
@@ -1256,7 +1256,7 @@ mod tests {
             let err = validate_page_header(&header)
                 .expect_err("sayfadan geniş sol kenar boşluğu reddedilmeliydi");
             assert!(
-                err.to_string().contains("Geçersiz sol kenar boşluğu"),
+                err.to_string().contains("invalid left margin"),
                 "{} pt için yanlış hata: {}",
                 margin,
                 err
@@ -1488,7 +1488,11 @@ mod tests {
             &current_service_date(),
         )
         .expect_err("sayfa sınırı aşılınca hata beklenir");
-        assert!(err.to_string().contains("sayfa sınırını aştı"), "{}", err);
+        assert!(
+            err.to_string().contains("exceeded the page limit"),
+            "{}",
+            err
+        );
         // Sınır aşılsa bile iş düzgün kapatılmalı (Y-03 garantisi).
         assert!(out.ends_with(spl::PJL_END));
     }
@@ -1506,7 +1510,11 @@ mod tests {
             .account_page(1, 1)
             .expect_err("bütçeyi bir bayt aşmak hata vermeli");
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-        assert!(err.to_string().contains("ham raster hacmi"), "{}", err);
+        assert!(
+            err.to_string().contains("exceeded the raster volume limit"),
+            "{}",
+            err
+        );
 
         // Sarma yerine doyma: sınırlar ileride büyütülse bile taşma sessizce
         // bütçeyi sıfırlamamalı.
@@ -1546,7 +1554,11 @@ mod tests {
             .account_page(1, MAX_REALISTIC_COPIES)
             .expect_err("yaprak sınırı aşılınca hata beklenir");
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-        assert!(err.to_string().contains("yaprak sınırını aştı"), "{}", err);
+        assert!(
+            err.to_string().contains("exceeded the sheet limit"),
+            "{}",
+            err
+        );
     }
 
     /// Yaprak bütçesi tam sınırda kabul etmeli, bir yaprak fazlasında reddetmeli.
@@ -1596,7 +1608,11 @@ mod tests {
             &current_service_date(),
         )
         .expect_err("yaprak sınırı aşılınca hata beklenir");
-        assert!(err.to_string().contains("yaprak sınırını aştı"), "{}", err);
+        assert!(
+            err.to_string().contains("exceeded the sheet limit"),
+            "{}",
+            err
+        );
         // Sınır aşılsa bile iş düzgün kapatılmalı (Y-03 garantisi).
         assert!(out.ends_with(spl::PJL_END));
     }

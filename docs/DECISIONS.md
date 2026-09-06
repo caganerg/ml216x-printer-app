@@ -732,3 +732,16 @@ deliberately later, never inlined into source.
 
 **Known deviation:** `src/golden.rs` and `goldens/README.md` were written in
 Turkish before this decision was taken and need converting.
+
+**Corrected 2026-09-06:** the deviation was wider than those two files. Every
+diagnostic string in `spl2-core` — the error messages, the warnings and the
+`QPDL width:` debug line — was Turkish as well, and the PAPPL migration made
+them user-visible: they are written into the printer application's job log,
+where a Turkish sentence reached a reader who has no reason to read Turkish.
+All of them are now English, along with the test assertions that matched on
+them; the goldens are byte identical across the change, because no diagnostic
+reaches the SPL2 stream. What remains Turkish is the **comments** — in
+`src/main.rs`, `src/golden.rs` and the four `spl2-core` modules — plus
+`goldens/README.md`. Those are the legacy the original deviation named, and
+none of them is user-visible, so they are left to a dedicated pass rather than
+mixed into a change about behaviour.

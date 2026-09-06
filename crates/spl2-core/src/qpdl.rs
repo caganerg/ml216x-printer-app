@@ -794,7 +794,7 @@ fn sanitize_pjl_field(input: &str) -> String {
         out.push_str(piece);
     }
 
-    debug_assert!(out.is_ascii(), "sanitize_pjl_field çıktısı ASCII olmalı");
+    debug_assert!(out.is_ascii(), "sanitize_pjl_field output must be ASCII");
     out
 }
 
@@ -981,7 +981,7 @@ impl<W: Write> SplStreamWriter<W> {
         let payload_bytes = Algo0x11::compress(raw_bitmap).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Algo 0x11 sıkıştırıcısı bant için payload üretemedi (boş bant verisi).",
+                "the Algo 0x11 compressor produced no payload for the band (empty band data).",
             )
         })?;
         let compression_type = SplCompression::Rle;
@@ -1000,8 +1000,8 @@ impl<W: Write> SplStreamWriter<W> {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!(
-                    "Sayfa {} banttan fazlasını içeriyor: QPDL bant sırası alanı 8 bitlik, \
-                     bu yüzden bir sayfada en çok {} bant taşınabilir.",
+                    "the page holds more than {} bands: the QPDL band-order field is \
+                     8 bits, so a page can carry at most {} bands.",
                     u8::MAX as u16 + 1,
                     u8::MAX as u16 + 1
                 ),
@@ -1118,7 +1118,7 @@ mod tests {
             .write_compressed_band(64, 1, &band)
             .expect_err("257. bant hata vermeli");
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-        assert!(err.to_string().contains("8 bitlik"), "{}", err);
+        assert!(err.to_string().contains("8 bits"), "{}", err);
     }
 
     /// Sayaç sayfa başına sıfırlanır: art arda gelen sayfalar birbirinin

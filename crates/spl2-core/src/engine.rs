@@ -87,16 +87,16 @@ impl PageSetup {
         // bildirilen boyut ile gerçek payload'ın uyuşmamasına (DMA/RLE çözme
         // senkron kaybı) yol açar; bunun yerine `try_into` ile erken ve net
         // bir hata döndürüyoruz.
-        let to_u16 = |value: u32, alan: &str| -> io::Result<u16> {
+        let to_u16 = |value: u32, field: &str| -> io::Result<u16> {
             u16::try_from(value).map_err(|_| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("{} QPDL'nin 16-bit alanına sığmıyor: {} px", alan, value),
+                    format!("{} does not fit QPDL's 16-bit field: {} px", field, value),
                 )
             })
         };
-        let band_width_u16 = to_u16(band_width_pixels, "Bant genişliği")?;
-        let page_height_u16 = to_u16(geometry.height, "Sayfa yüksekliği")?;
+        let band_width_u16 = to_u16(band_width_pixels, "Band width")?;
+        let page_height_u16 = to_u16(geometry.height, "Page height")?;
 
         // CUPS raster verisi (595B) bant genişliğinde (620B) ortalanır, sonra
         // yazıcının sert kenar boşluğu düşülür; bkz. `band_placement`.
@@ -111,7 +111,7 @@ impl PageSetup {
             // söyleniyor.
             let left_note = if placement.src_skip > 0 {
                 format!(
-                    " ve sert kenar boşluğu nedeniyle sol kenarından {} B atılacak",
+                    " and {} B will be dropped from their left edge for the hard margin",
                     placement.src_skip
                 )
             } else {
@@ -120,8 +120,8 @@ impl PageSetup {
             log.log(
                 Level::Warning,
                 &format!(
-                    "Hesaplanan bant genişliği ({} B) CUPS satır genişliğinden ({} B) dar; \
-                     satırların sağ kenarı kırpılacak{}.",
+                    "The computed band width ({} B) is narrower than the CUPS line \
+                     width ({} B); lines will be clipped on the right{}.",
                     band_width_bytes, cups_line_bytes, left_note
                 ),
             );
@@ -130,7 +130,7 @@ impl PageSetup {
         log.log(
             Level::Debug,
             &format!(
-                "QPDL Genişlik: cupsWidth={}, pageWidthPx={}, bandWidthPx={}, bandWidthB={}, \
+                "QPDL width: cupsWidth={}, pageWidthPx={}, bandWidthPx={}, bandWidthB={}, \
                  hardMarginB={}, dstOffsetB={}, srcSkipB={}",
                 geometry.width,
                 page_width_pixels,
@@ -152,7 +152,7 @@ impl PageSetup {
         .ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Doğrulanmış kâğıt ölçüsü QPDL koduna dönüştürülemedi",
+                "the validated paper size has no QPDL code",
             )
         })?;
 
@@ -162,10 +162,10 @@ impl PageSetup {
                 log.log(
                     Level::Warning,
                     &format!(
-                        "Tanınmayan MediaPosition değeri: {}; QPDL kağıt kaynağı \
-                         Auto olarak gönderiliyor. PPD'nin *InputSlot seçenekleri QPDL \
-                         kodlarıyla numaralandırılmalıdır (1=Auto, 2=Manual, 3=Multi, \
-                         4=Upper, 5=Lower).",
+                        "Unrecognised MediaPosition value: {}; sending Auto as the \
+                         QPDL paper source. The PPD's *InputSlot choices must be \
+                         numbered with the QPDL codes themselves (1=Auto, 2=Manual, \
+                         3=Multi, 4=Upper, 5=Lower).",
                         geometry.media_position
                     ),
                 );
@@ -177,14 +177,14 @@ impl PageSetup {
             SplResolution::from_dpi_exact(geometry.hw_resolution[0]).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "Yatay çözünürlük QPDL koduna dönüştürülemedi",
+                    "the horizontal resolution has no QPDL code",
                 )
             })?;
         let resolution_y =
             SplResolution::from_dpi_exact(geometry.hw_resolution[1]).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "Dikey çözünürlük QPDL koduna dönüştürülemedi",
+                    "the vertical resolution has no QPDL code",
                 )
             })?;
 

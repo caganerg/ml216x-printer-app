@@ -203,19 +203,19 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
 
     if header.bytes_per_line == 0 || header.bytes_per_line > MAX_BYTES_PER_LINE {
         return invalid(format!(
-            "Geçersiz cupsBytesPerLine değeri: {}",
+            "invalid cupsBytesPerLine value: {}",
             header.bytes_per_line
         ));
     }
     if header.height == 0 || header.height > MAX_LINES {
         return invalid(format!(
-            "Geçersiz sayfa yüksekliği (satır sayısı): {}",
+            "invalid page height (scanline count): {}",
             header.height
         ));
     }
     if !SplResolution::pair_is_supported(header.hw_resolution[0], header.hw_resolution[1]) {
         return invalid(format!(
-            "Desteklenmeyen çözünürlük: {}x{} DPI (desteklenenler: 300x300, 600x600, 1200x600, 1200x1200)",
+            "unsupported resolution: {}x{} DPI (supported: 300x300, 600x600, 1200x600, 1200x1200)",
             header.hw_resolution[0], header.hw_resolution[1]
         ));
     }
@@ -225,7 +225,7 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
         || header.page_size_points[1] > MAX_POINTS
     {
         return invalid(format!(
-            "Geçersiz sayfa boyutu (pt): {:?}",
+            "invalid page size (pt): {:?}",
             header.page_size_points
         ));
     }
@@ -236,7 +236,7 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
     .is_none()
     {
         return invalid(format!(
-            "Desteklenmeyen kâğıt ölçüsü: {} x {} pt; QPDL kâğıt kodu ile raster geometrisinin uyuşması gerekir",
+            "unsupported paper size: {} x {} pt; the QPDL paper code and the raster geometry must agree",
             header.page_size_points[0], header.page_size_points[1]
         ));
     }
@@ -257,7 +257,7 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
     // aynı zamanda taşmayı da kapatır.
     if header.margins[0] >= header.page_size_points[0] {
         return invalid(format!(
-            "Geçersiz sol kenar boşluğu: {} pt; sayfa genişliğinden ({} pt) küçük olmalı",
+            "invalid left margin: {} pt; it must be smaller than the page width ({} pt)",
             header.margins[0], header.page_size_points[0]
         ));
     }
@@ -272,20 +272,20 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
     // reddediyoruz.
     if header.color_space != CupsColorSpace::K {
         return invalid(format!(
-            "Desteklenmeyen renk uzayı: {} (yalnızca 1-bit K/monokrom destekleniyor)",
+            "unsupported colour space: {} (only 1-bit K/monochrome is supported)",
             header.color_space
         ));
     }
     if header.bits_per_color != 1 || header.bits_per_pixel != 1 {
         return invalid(format!(
-            "Desteklenmeyen bit derinliği: bitsPerColor={}, bitsPerPixel={} (yalnızca 1-bit monokrom destekleniyor)",
+            "unsupported bit depth: bitsPerColor={}, bitsPerPixel={} (only 1-bit monochrome is supported)",
             header.bits_per_color, header.bits_per_pixel
         ));
     }
     let expected_bytes_per_line = (header.width as u64 * header.bits_per_pixel as u64).div_ceil(8);
     if expected_bytes_per_line != header.bytes_per_line as u64 {
         return invalid(format!(
-            "cupsBytesPerLine ({}) cupsWidth ({}) ile tutarsız (beklenen: {})",
+            "cupsBytesPerLine ({}) is inconsistent with cupsWidth ({}) (expected: {})",
             header.bytes_per_line, header.width, expected_bytes_per_line
         ));
     }
@@ -297,7 +297,7 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
     // düzen kullandığının işaretidir ve sessizce yanlış yorumlanmamalıdır.
     if let CupsColorOrder::Unknown(order) = header.color_order {
         return invalid(format!(
-            "Tanınmayan cupsColorOrder değeri: {} (beklenen: 0=Chunked, 1=Banded, 2=Planar)",
+            "unrecognised cupsColorOrder value: {} (expected: 0=Chunked, 1=Banded, 2=Planar)",
             order
         ));
     }
@@ -320,7 +320,7 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
         compute_page_width_pixels(header.page_size_points[0], header.hw_resolution[0]).div_ceil(8);
     if header.bytes_per_line > band_width_bytes + LINE_OVERSHOOT_SLACK_BYTES {
         return invalid(format!(
-            "cupsBytesPerLine ({}) sayfa genişliğine sığmıyor: {} pt @ {} DPI => en fazla {} bayt/satır",
+            "cupsBytesPerLine ({}) does not fit the page width: {} pt @ {} DPI => at most {} bytes/line",
             header.bytes_per_line,
             header.page_size_points[0],
             header.hw_resolution[0],
@@ -353,7 +353,7 @@ pub fn validate_page_geometry(header: &PageGeometry) -> io::Result<()> {
         compute_page_height_lines(header.page_size_points[1], header.hw_resolution[1]);
     if header.height > page_height_lines + HEIGHT_OVERSHOOT_SLACK_LINES {
         return invalid(format!(
-            "cupsHeight ({}) sayfa yüksekliğine sığmıyor: {} pt @ {} DPI => en fazla {} satır",
+            "cupsHeight ({}) does not fit the page height: {} pt @ {} DPI => at most {} lines",
             header.height, header.page_size_points[1], header.hw_resolution[1], page_height_lines
         ));
     }
@@ -493,8 +493,8 @@ pub fn band_placement(
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "Sert kenar boşluğu ({} B) satır genişliğini ({} B) aşıyor: \
-                 bant {} B, ortalama {} B; basılacak içerik kalmıyor",
+                "the hard margin ({} B) exceeds the line width ({} B): band {} B, \
+                 centred at {} B; no content would be left to print",
                 hard_margin_bytes, cups_line_bytes, band_width_bytes, centered
             ),
         ));
@@ -575,8 +575,9 @@ pub fn pjl_paper_type_for(media_type: &str, log: &dyn Log) -> &'static str {
             log.log(
                 Level::Warning,
                 &format!(
-                    "Tanınmayan MediaType {}; @PJL SET PAPERTYPE={} gönderiliyor. \
-                     PPD'nin *MediaType anahtarları yazıcının PJL sözlüğünden olmalıdır: {}.",
+                    "Unrecognised MediaType {}; sending @PJL SET PAPERTYPE={}. The \
+                     PPD's *MediaType keys must come from the printer's own PJL \
+                     vocabulary: {}.",
                     quote_untrusted(media_type),
                     qpdl::PJL_PAPERTYPE_DEFAULT,
                     qpdl::PJL_PAPER_TYPES.join(", ")
@@ -752,8 +753,8 @@ impl JobBudget {
         self.pages += 1;
         if self.pages > MAX_PAGES_PER_JOB {
             return Err(exceeded(format!(
-                "İş, sayfa sınırını aştı: {} sayfadan fazlası işlenmiyor. \
-                 Belge gerçekten bu kadar uzunsa işi parçalara bölün.",
+                "the job exceeded the page limit: no more than {} pages are processed. \
+                 If the document really is that long, split the job.",
                 MAX_PAGES_PER_JOB
             )));
         }
@@ -761,9 +762,9 @@ impl JobBudget {
         self.raster_bytes = self.raster_bytes.saturating_add(page_raster_bytes);
         if self.raster_bytes > MAX_JOB_RASTER_BYTES {
             return Err(exceeded(format!(
-                "İş, ham raster hacmi sınırını aştı: {} bayttan fazlası işlenmiyor \
-                 (şu ana kadar {} bayt). Belge gerçekten bu kadar büyükse işi \
-                 parçalara bölün ya da daha düşük bir çözünürlük seçin.",
+                "the job exceeded the raster volume limit: no more than {} bytes are \
+                 processed ({} so far). If the document really is that large, split \
+                 the job or choose a lower resolution.",
                 MAX_JOB_RASTER_BYTES, self.raster_bytes
             )));
         }
@@ -771,9 +772,8 @@ impl JobBudget {
         self.impressions = self.impressions.saturating_add(copies as u64);
         if self.impressions > MAX_JOB_IMPRESSIONS {
             return Err(exceeded(format!(
-                "İş, yaprak sınırını aştı: {} yapraktan fazlası basılmıyor \
-                 (şu ana kadar {} yaprak = sayfa x kopya). Kopya sayısını \
-                 düşürün ya da işi parçalara bölün.",
+                "the job exceeded the sheet limit: no more than {} sheets are printed \
+                 ({} so far = pages x copies). Lower the copy count or split the job.",
                 MAX_JOB_IMPRESSIONS, self.impressions
             )));
         }

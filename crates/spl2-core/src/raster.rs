@@ -158,7 +158,7 @@ impl PageHeader {
     fn read_u32(buf: &[u8], offset: usize, is_be: bool) -> u32 {
         let slice: [u8; 4] = buf[offset..offset + 4]
             .try_into()
-            .expect("Hatalı dilim uzunluğu");
+            .expect("wrong slice length");
         if is_be {
             u32::from_be_bytes(slice)
         } else {
@@ -170,7 +170,7 @@ impl PageHeader {
     fn read_f32(buf: &[u8], offset: usize, is_be: bool) -> f32 {
         let slice: [u8; 4] = buf[offset..offset + 4]
             .try_into()
-            .expect("Hatalı dilim uzunluğu");
+            .expect("wrong slice length");
         if is_be {
             f32::from_be_bytes(slice)
         } else {
@@ -187,7 +187,7 @@ impl PageHeader {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 format!(
-                    "CUPS Raster başlık boyutu yetersiz (beklenen: {} bayt, gelen: {} bayt)",
+                    "the CUPS Raster header is too short (expected: {} bytes, got: {} bytes)",
                     expected_size,
                     buf.len()
                 ),
@@ -346,7 +346,7 @@ impl<R: Read> CupsRasterReader<R> {
             if e.kind() == io::ErrorKind::UnexpectedEof {
                 return Err(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
-                    "Girdi akışı boş (0 bayt). cupsfilter veya önceki filtre aşamasının başarıyla raster ürettiğinden emin olun.",
+                    "the input stream is empty (0 bytes). Check that cupsfilter, or the preceding filter stage, produced raster successfully.",
                 ));
             }
             return Err(e);
@@ -363,7 +363,7 @@ impl<R: Read> CupsRasterReader<R> {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
-                        "Geçersiz CUPS Raster formatı: {:?} (Beklenen: 'RaSt', 'tSaR', 'RaS2', '2SaR', 'RaS3', '3SaR')",
+                        "invalid CUPS Raster format: {:?} (expected: 'RaSt', 'tSaR', 'RaS2', '2SaR', 'RaS3', '3SaR')",
                         String::from_utf8_lossy(other)
                     ),
                 ));
@@ -418,8 +418,9 @@ impl<R: Read> CupsRasterReader<R> {
             return Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 format!(
-                    "CUPS Raster akışı sayfa başlığının ortasında kesildi \
-                     ({} / {} bayt okundu). Önceki filtre aşaması yarıda kesilmiş olabilir.",
+                    "the CUPS Raster stream ended in the middle of a page header \
+                     ({} of {} bytes read). The preceding filter stage may have been \
+                     interrupted.",
                     total_read, header_len
                 ),
             ));
@@ -521,7 +522,7 @@ impl CupsLineDecoder {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
-                    "Satır uzunluğu sayfa ortasında değişti: {} -> {}",
+                    "the line length changed in the middle of a page: {} -> {}",
                     self.last_line.len(),
                     out.len()
                 ),
@@ -560,14 +561,14 @@ impl CupsLineDecoder {
                 let count = (257 - n as usize).checked_mul(bpp).ok_or_else(|| {
                     io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "CUPS v2 literal kayıt uzunluğu taşma oluşturdu",
+                        "the CUPS v2 literal record length overflowed",
                     )
                 })?;
                 if count > line_len - pos {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!(
-                            "CUPS v2 literal kayıt satır sınırını aşıyor: kalan {} bayt, kayıt {} bayt",
+                            "the CUPS v2 literal record crosses the line boundary: {} bytes left, record {} bytes",
                             line_len - pos,
                             count
                         ),
@@ -582,14 +583,14 @@ impl CupsLineDecoder {
             let count = (n as usize + 1).checked_mul(bpp).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "CUPS v2 tekrar kayıt uzunluğu taşma oluşturdu",
+                    "the CUPS v2 repeat record length overflowed",
                 )
             })?;
             if count > line_len - pos {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
-                        "CUPS v2 tekrar kaydı satır sınırını aşıyor: kalan {} bayt, kayıt {} bayt",
+                        "the CUPS v2 repeat record crosses the line boundary: {} bytes left, record {} bytes",
                         line_len - pos,
                         count
                     ),
@@ -885,7 +886,11 @@ mod tests {
                 .read_line(&mut line)
                 .expect_err("satırı aşan v2 kaydı reddedilmeliydi");
             assert_eq!(err.kind(), io::ErrorKind::InvalidData);
-            assert!(err.to_string().contains("satır sınırını"), "{}", err);
+            assert!(
+                err.to_string().contains("crosses the line boundary"),
+                "{}",
+                err
+            );
         }
     }
 
