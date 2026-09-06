@@ -20,7 +20,7 @@ outside the Q-1..Q-11 range.
 
 ---
 
-## 2026-09-06 — Q-14 (OPEN): a normal-quality job runs at a resolution the document was never rendered at
+## 2026-09-06 — Q-14 (DECIDED): a normal-quality job runs at a resolution the document was never rendered at
 
 Raised while analysing the state of the tree before P7, by driving the built
 application over a loopback socket. It is the most serious thing found so far
@@ -81,9 +81,53 @@ the decision this question asks for.
 `apt-get source pappl` needs a network fetch from `deb.debian.org`, which is
 why it is proposed here rather than already done.
 
+**Decision (maintainer delegated the call): (a) then (c) — read the source,
+then constrain what PAPPL may choose.** The source was fetched and read, and it
+changes the answer in two ways.
+
+*The out-of-bounds read does not exist.* `pappl/job-process.c` allocates the
+scanline buffer at `max(options->header.cupsBytesPerLine,
+header.cupsBytesPerLine)` — when the job's line is the longer one it mallocs
+`options->header.cupsBytesPerLine`, pre-fills it with white, and overwrites
+only the leading `header.cupsBytesPerLine` bytes of it per line — so the slice
+this repository builds from the options header is always inside the allocation.
+The exposure is closed by observation of the source, not by assumption.
+
+*Fail-the-job is not implementable, and would not be the right answer even if
+it were.* The driver is never handed the document's header: PAPPL adopts it
+only when both sides are at least 8 bits per pixel (`options->header = header`
+is guarded by `cupsBitsPerPixel >= 8` on both), so a 1-bit driver sees only the
+header PAPPL built. Short lines are padded with white and missing lines are
+appended blank, and nothing in the callback signature distinguishes that from a
+page which is genuinely white on the right. There is no mismatch to detect and
+therefore nothing to refuse.
+
+What is left is to remove the mismatch at its source, which the same file makes
+mechanical: with no `printer-resolution` in the request, PAPPL picks
+`x_resolution[0]` for draft quality, `x_resolution[num_resolution / 2]` for
+normal and `x_resolution[num_resolution - 1]` for high, and never reads
+`x_default`/`y_default`. The declared list was ordered
+`[300x300, 600x600, 1200x600, 1200x1200]`, so normal quality — every ordinary
+job — selected 1200x600. It is now ordered
+`[300x300, 1200x600, 600x600, 1200x1200]`, which leaves the same four modes
+supported while putting the printer's real default where PAPPL looks for it.
+`Capabilities` carries `default_resolution` alongside the list and
+`Application::run` refuses to start when the middle entry is not that default,
+so the ordering cannot be undone by a later edit that looks harmless.
+
+Measured after the change: a document rendered at 600x600 and submitted with no
+`printer-resolution` produces a stream **byte identical** to the one the same
+document produced when the resolution was pinned by hand
+(`8237f67d...` over both paths), and the clipping warning the mismatch used to
+raise is gone. `scripts/transport-probe.py` submits each of the three
+qualities and checks the QPDL page header against this rule; reverting the list
+to its old order makes it fail with "normal ran at 1200x600 dpi, expected
+600x600", so the check has been shown to go red for the defect it exists to
+catch.
+
 ---
 
-## 2026-09-06 — Q-15 (OPEN): the persisted state file carries printers across driver modes
+## 2026-09-06 — Q-15 (DECIDED): the persisted state file carries printers across driver modes
 
 Raised in the same session. PAPPL's mainloop persists the system to
 `$XDG_CONFIG_HOME/ml216x-printer-app.state` and reloads it at startup on its
@@ -117,9 +161,31 @@ is chosen, `scripts/p5-probe.py` already scopes `XDG_CONFIG_HOME` to a
 temporary directory, and any manual run must do the same — a plain
 `ml216x-printer-app server` writes into the user's real `~/.config`.
 
+**Decision (maintainer delegated the call): (c) with (b)'s naming, and not
+(a).** (a) was the expectation, and the obvious way to reach it — renaming
+`argv[0]` in probe mode, since PAPPL derives the state file from
+`basename(argv[0])` — turned out to be wrong: `mainloop.c` also keeps `argv[0]`
+as `_papplMainloopPath` and `posix_spawn`s it to auto-start a server, so a name
+that is not a real executable would break the client subcommands in a way
+nothing tests.
+
+So probe mode persists nothing at all. `papplSystemSetSaveCallback` is now
+bound and called with a callback that succeeds without writing; the mainloop
+installs its own state file only `if (!system->save_cb)`
+(`pappl/mainloop-subcommands.c`), so a probe run neither loads the user's state
+nor writes to it. This also removes the hazard that produced the finding: a
+manual probe run no longer touches `~/.config` even when `XDG_CONFIG_HOME` is
+not scoped.
+
+(b)'s naming comes along as the second layer. The probe driver is now
+`samsung_ml216x_probe` and the SPL2 driver `samsung_ml216x`, so a printer saved
+by one is refused by the other at load — `driver_cb` already fails on an
+unknown driver name — rather than being adopted silently. Verified: a probe
+server writes no `.state` file, and an SPL2 server still writes one.
+
 ---
 
-## 2026-09-06 — Q-16 (OPEN): the SPL2 driver advertises the geometry probe's format
+## 2026-09-06 — Q-16 (DECIDED): the SPL2 driver advertises the geometry probe's format
 
 Raised in the same session. `driver_cb` sets
 `data.format = "application/x-pappl-geometry-probe"` unconditionally, so the
@@ -151,9 +217,37 @@ decision, and it is the maintainer's: the PPD says `SPL,FWV,EXT` for real
 hardware, while the application currently announces itself as
 "ML-216x (P5 development)".
 
+**Decision (maintainer delegated the call): (a), with
+`application/octet-stream` as the name.** (b) — declaring no format at all —
+was the expectation and it **crashes the server**. It was implemented, and the
+first PWG raster job killed the process: `_papplJobProcess` reaches
+`else if (!strcmp(job->format, job->printer->driver_data.format))`
+(`pappl/job-process.c`) with no NULL guard on the driver's side of the compare.
+The job returned `server-error-service-unavailable` and the log stopped
+mid-way through building the print options. A null `format` is not a supported
+configuration in 1.3.1, whatever `printer-driver.c`'s own guards suggest.
+
+`application/octet-stream` is the string PAPPL itself uses when a raw job
+arrives at a printer with no declared format (`printer-raw.c`), and
+`printer-driver.c` and `printer.c` both special-case it: it is excluded from
+`document-format-supported`, and `continue`d over when the `CMD:` list of the
+IEEE-1284 device ID is assembled. So it satisfies the compare, claims nothing,
+and appears nowhere. Raw jobs still land in `printfile_cb`, which still refuses
+them.
+
+The probe keeps `application/x-pappl-geometry-probe`, which is now the only
+place that string appears. `MDL` follows from the driver description and is
+now "ML-216x Series" rather than "ML-216x (P5 development)" — P5 is finished,
+and the release condition is stated by gate G-1, not by a model name. Measured
+after the change, the published device ID is
+`MFG:Samsung;MDL:ML-216x Series;CMD:PWGRaster,URF,JPEG,PNG;`. The `CMD:` list
+is PAPPL's own from the formats it can accept; it is not the PPD's
+`CMD:SPL,FWV,EXT`, which describes what the *printer* speaks rather than what
+this queue accepts, and the two should not be conflated.
+
 ---
 
-## 2026-09-06 — Q-17 (OPEN): discovery, and whether the application may ever add a printer by itself
+## 2026-09-06 — Q-17 (DECIDED): discovery, and whether the application may ever add a printer by itself
 
 Raised in the same session, because P7 is the step where it would be
 implemented if it were wanted. `papplMainloop` is called with
@@ -177,6 +271,13 @@ because the threat it describes is exactly what (b) and (c) reopen: a device ID
 is self-reported and unauthenticated. Recording it as a decision matters
 because "we never got round to it" and "we decided not to" look identical in
 the code.
+
+**Decision (maintainer delegated the call): (a).** `autoadd_cb` stays null, and
+the null now carries a comment at the call site saying why, so the next reader
+finds a decision rather than a gap. `devices` lists what is attached and
+`add -v` commits to one; nothing in this application chooses a destination on
+its own. If a future step wants (b), it needs the README's note rewritten
+first, because (b) contradicts it.
 
 ---
 

@@ -10,7 +10,7 @@ The obvious form would be a column giving the PAPPL version that introduced
 each symbol. That column cannot be filled honestly from what is installed
 here: the 1.3.1 headers contain exactly **one** `@since` annotation in total —
 `PAPPL_SOPTIONS_NO_TLS`, `@since PAPPL 1.1@` in `system.h` — so an
-"introduced in" column would be invented for the other 44 entries, which
+"introduced in" column would be invented for the other 45 entries, which
 project rule 1 forbids in spirit and rule 2 in letter.
 
 What can be established mechanically is stronger for the purpose the
@@ -34,7 +34,7 @@ says stop and ask rather than raising the floor.
 ## The table
 
 Verified on 2026-09-05 against `libpappl-dev` / `libpappl1t64` 1.3.1-2.1+b2,
-`pkg-config --modversion pappl` = 1.3.1. All 45 symbols are exported by the
+`pkg-config --modversion pappl` = 1.3.1. All 46 symbols are exported by the
 installed library; `cargo test -p pappl-sys` re-checks this on every run.
 
 | Symbol | Declared in | Exported by installed 1.3.1 |
@@ -52,6 +52,7 @@ installed library; `cargo test -p pappl-sys` re-checks this on every run.
 | `papplSystemGetLogLevel` | `system.h` | yes |
 | `papplSystemLoadState` | `system.h` | yes |
 | `papplSystemSaveState` | `system.h` | yes |
+| `papplSystemSetSaveCallback` | `system.h` | yes |
 | `papplPrinterCreate` | `printer.h` | yes |
 | `papplPrinterDelete` | `printer.h` | yes |
 | `papplPrinterSetDriverData` | `printer.h` | yes |

@@ -70,10 +70,23 @@ fn run() -> Result<i32, Box<dyn std::error::Error>> {
     std::fs::create_dir_all(&spool)?;
     let app = Application {
         capabilities: Capabilities {
-            name: c"samsung_ml216x",
-            description: c"Samsung ML-216x (P5 development)",
+            // Q-15: the two drivers do not share a name, so a printer saved by
+            // one is refused by the other rather than silently adopted.
+            name: if probe {
+                c"samsung_ml216x_probe"
+            } else {
+                c"samsung_ml216x"
+            },
+            description: c"Samsung ML-216x Series",
             media: media_table::MEDIA,
-            resolutions: &[(300, 300), (600, 600), (1200, 600), (1200, 1200)],
+            // The order decides what a job that names no resolution runs at:
+            // PAPPL takes the first entry for draft quality, the middle one for
+            // normal and the last for high, and never consults the declared
+            // default. Normal quality therefore has to sit in the middle. See
+            // `pappl::application::quality_resolutions` for the transcription
+            // of PAPPL's rule, and Q-14 for what the old order did.
+            resolutions: &[(300, 300), (1200, 600), (600, 600), (1200, 1200)],
+            default_resolution: (600, 600),
             sources: media_table::SOURCE_NAMES,
             types: media_table::TYPE_NAMES,
             // 12.5 pt = 440.9722... hundredths mm, nearest IPP unit is 441.

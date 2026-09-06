@@ -80,37 +80,57 @@ Corrects an earlier statement here that the application "can only reach a
   not scope `XDG_CONFIG_HOME` writes into the user's real `~/.config`; only
   `scripts/p5-probe.py` scopes it today.
 
-## Next work — P7, device transport and the job-geometry contract
+## P7 so far — the job-geometry contract, closed
 
-**P7 opens with a defect, not with a feature.** A job submitted without an
-explicit `printer-resolution` ran at 1200x600 while the document was rendered
-at 600x600, and completed rather than failing: `cupsWidth=9921`,
-`bandWidthB=1240`, `hardMarginB=27` for a document 4960 px wide with 620-byte
-lines. That is open question **Q-14**, and it carries a possible out-of-bounds
-read, because the scanline slice is sized from the options header while the
-buffer may be sized from the document's. Order of work:
+Q-14 to Q-17 were raised, then decided by delegation and implemented in the
+same session; `docs/DECISIONS.md` carries the reasoning and what the PAPPL
+source actually said. In short:
 
-1. **Read `pappl/job-process.c` from `pappl 1.3.1-2.1`** and settle how the
-   `rwriteline_cb` buffer is sized and whether PAPPL scales, pads or crops
-   raster input. Everything else in P7 depends on the answer. Needs a network
-   fetch (`apt-get source pappl`), so ask first.
-2. **Make the geometry contract explicit**: size the slice from what PAPPL
-   guarantees, and fail a job whose document header disagrees with the options
-   header — a specific error and log line, never a clamp. Regression test: a
-   600 dpi document into a 1200x600 job must end `job-state=aborted`.
-3. **A transport harness** (`scripts/transport-probe.py`, in the shape of
-   `p5-probe.py`): loopback TCP sink, printer added over `socket://`, and the
-   received bytes compared **byte for byte** with the same job run to
-   `file://`. It only counts once it has been shown to go red — truncate the
-   sink's stream and watch it fail.
-4. **USB**, as far as it goes without hardware: a `devices` listing check,
+* **Q-14.** With no `printer-resolution` in the request, PAPPL selects by
+  print-quality from the *position* of the entry in the driver's resolution
+  list and never reads `x_default`/`y_default`, so normal quality — every
+  ordinary job — ran at 1200x600 while the document was rendered at 600x600.
+  The list is reordered so the middle entry is the default, and
+  `Application::run` refuses to start if that stops being true. A 600 dpi
+  document with no requested resolution now yields a stream byte identical to
+  the pinned-resolution one.
+* **The suspected out-of-bounds read does not exist.** `job-process.c`
+  allocates the line buffer at the larger of the two headers'
+  `cupsBytesPerLine` and pre-fills the padding, so the slice built from the
+  options header is always inside the allocation. Equally, a mismatch **cannot**
+  be detected from inside the driver: for 1-bit output PAPPL never adopts the
+  document's header, pads short lines with white and appends blank ones.
+  Refusing such a job is not implementable in 1.3.1; ordering the list is what
+  prevents it.
+* **Q-15.** A probe run now persists nothing (`papplSystemSetSaveCallback` with
+  a callback that writes nowhere), and the two drivers no longer share a name.
+* **Q-16.** The SPL2 driver's format is `application/octet-stream`; declaring
+  none crashes the server on the first raster job, which is recorded with the
+  source line that does it. The device ID is now
+  `MFG:Samsung;MDL:ML-216x Series;CMD:PWGRaster,URF,JPEG,PNG;`.
+* **Q-17.** `autoadd_cb` stays null, deliberately and now visibly.
+
+`scripts/transport-probe.py` is the new harness: it prints the same job to a
+`file://` destination and to a loopback `socket://` device and requires the two
+streams to be byte identical, and it checks each print-quality against PAPPL's
+resolution rule. It has been shown to go red three ways — a truncated socket
+stream, a single flipped bit, and the old resolution order.
+
+## Next work — the rest of P7
+
+1. **USB**, as far as it goes without hardware: a `devices` listing check,
    `papplDeviceIsSupported` on a `usb://` URI, and the permission story written
    down — access to `/dev/bus/usb` is a packaging matter, not a code one.
-5. **Q-15's state-file isolation**, so a probe printer cannot come back under
-   the SPL2 driver.
-6. **Q-16's format string and device ID**, so the printer stops advertising the
-   geometry probe's MIME type.
-7. **Q-17 recorded as a decision** — no `autoadd_cb`, matching the README.
+   Socket transport is proven; USB has still never been opened.
+2. **Packaging for the printer application**: `packaging/debian/control` still
+   describes the 1.x filter, and there is no service unit, no user, and no udev
+   rule for the USB case.
+3. **P9's raster-type and dithering review.** Note what the source reading
+   turned up for it: with `force_raster_type = BLACK_1`, PAPPL selects a dither
+   matrix by quality and content, and `image/jpeg` and `image/png` reach the
+   driver through PAPPL's own filters — so the dithering path is *not*
+   unreachable for us, and P9 has to characterise it rather than assume 1-bit
+   input everywhere.
 
 Two smaller items found alongside, neither blocking:
 
@@ -124,11 +144,9 @@ Two smaller items found alongside, neither blocking:
   confirming in the source before it is reported anywhere, and worth knowing
   before anyone debugs from those numbers.
 
-Then P9's raster-type and dithering review — the probe measured BLACK_1/PWG
-only, and nothing characterises what PAPPL's PNG or JPEG conversion produces.
 Keep the original filter in-tree until P11 passes; keep the PPD permanently.
-Hardware G-1 and open questions Q-12 to Q-17 remain outstanding. No hardware
-print was performed.
+Hardware G-1 and open questions Q-12 and Q-13 remain outstanding; Q-14 to Q-17
+are decided and implemented. No hardware print was performed.
 
 Checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo fmt --all --check`, golden checksums, and all three `p5-probe.py` modes

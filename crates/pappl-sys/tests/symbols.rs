@@ -36,6 +36,7 @@ const DECLARED: &[&str] = &[
     "papplSystemGetLogLevel",
     "papplSystemLoadState",
     "papplSystemSaveState",
+    "papplSystemSetSaveCallback",
     "papplPrinterCreate",
     "papplPrinterDelete",
     "papplPrinterSetDriverData",

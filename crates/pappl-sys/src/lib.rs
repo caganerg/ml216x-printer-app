@@ -540,6 +540,12 @@ pub type pappl_pr_usb_cb_t = Option<
 >;
 
 /// ```c
+/// typedef bool (*pappl_save_cb_t)(pappl_system_t *system, void *data);
+/// ```
+pub type pappl_save_cb_t =
+    Option<unsafe extern "C" fn(system: *mut pappl_system_t, data: *mut c_void) -> bool>;
+
+/// ```c
 /// typedef const char *(*pappl_pr_autoadd_cb_t)(const char *device_info, const char *device_uri, const char *device_id, void *data);
 /// ```
 pub type pappl_pr_autoadd_cb_t = Option<
@@ -908,6 +914,20 @@ extern "C" {
     /// extern bool papplSystemSaveState(pappl_system_t *system, const char *filename);
     /// ```
     pub fn papplSystemSaveState(system: *mut pappl_system_t, filename: *const c_char) -> bool;
+
+    /// ```c
+    /// extern void papplSystemSetSaveCallback(pappl_system_t *system, pappl_save_cb_t cb, void *data);
+    /// ```
+    ///
+    /// Setting this suppresses the mainloop's own state handling: the `server`
+    /// subcommand installs a state file only `if (!system->save_cb)`
+    /// (`pappl/mainloop-subcommands.c`), so a system that already has one
+    /// neither loads nor writes `$XDG_CONFIG_HOME/<base name>.state`.
+    pub fn papplSystemSetSaveCallback(
+        system: *mut pappl_system_t,
+        cb: pappl_save_cb_t,
+        data: *mut c_void,
+    );
 
     // ---- printer.h -------------------------------------------------------
 

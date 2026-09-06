@@ -31,10 +31,57 @@ pub struct Capabilities {
     pub name: &'static CStr,
     pub description: &'static CStr,
     pub media: &'static [Media],
+    /// Supported resolutions. **The order is load-bearing** — see
+    /// [`quality_resolutions`].
     pub resolutions: &'static [(i32, i32)],
     pub sources: &'static [&'static CStr],
     pub types: &'static [&'static CStr],
     pub margin: i32,
+    /// The resolution a job that names none must run at.
+    ///
+    /// Declared separately from `resolutions` so that [`Application::run`] can
+    /// refuse to start when PAPPL's own choice would differ from it.
+    pub default_resolution: (i32, i32),
+}
+
+/// What PAPPL picks for a job that carries no `printer-resolution`, by
+/// print-quality: `[draft, normal, high]`.
+///
+/// This is not a guess about PAPPL; it is a transcription of
+/// `papplJobCreatePrintOptions` in `pappl/job-process.c` of the 1.3.1 source
+/// (`pappl 1.3.1-2.1`), which selects by index into the driver's resolution
+/// list:
+///
+/// ```c
+/// else if (options->print_quality == IPP_QUALITY_DRAFT)
+///   options->printer_resolution[0] = printer->driver_data.x_resolution[0];
+/// else if (options->print_quality == IPP_QUALITY_NORMAL)
+///   i = (cups_len_t)printer->driver_data.num_resolution / 2;
+/// else  // high
+///   i = (cups_len_t)printer->driver_data.num_resolution - 1;
+/// ```
+///
+/// Two consequences drove the way `Capabilities` is validated. `x_default` and
+/// `y_default` are **not** consulted here — they are advertised as
+/// `printer-resolution-default` and otherwise unused on the job path — so
+/// declaring a 600 dpi default does not make a normal-quality job run at
+/// 600 dpi. And the list order is the only thing that decides the mapping;
+/// nothing else in PAPPL reads it (`printer-resolution-supported` and
+/// `pwg-raster-document-resolution-supported` are sets).
+///
+/// This matters beyond page size. A client that pre-rendered `image/pwg-raster`
+/// at one resolution and a job header built at another do not meet: for 1-bit
+/// output PAPPL keeps its own header (it adopts the document's only when both
+/// sides are >= 8 bits per pixel), pads each short line with white and appends
+/// blank lines, and the driver is never told. The page then prints at the
+/// wrong scale and the job still reports success. Keeping the normal-quality
+/// entry equal to the declared default is what stops that for ordinary jobs.
+pub fn quality_resolutions(resolutions: &[(i32, i32)]) -> Option<[(i32, i32); 3]> {
+    Some([
+        *resolutions.first()?,
+        resolutions[resolutions.len() / 2],
+        *resolutions.last()?,
+    ])
 }
 
 pub struct Application {
@@ -300,6 +347,18 @@ impl Application {
         {
             return Err(error("invalid application capabilities or listen port"));
         }
+        // A job that names no resolution must land on the declared default.
+        // PAPPL picks by position in the list, so this is a property of the
+        // order, and getting it wrong prints every ordinary job at the wrong
+        // scale without failing it. See `quality_resolutions`.
+        if !c.resolutions.contains(&c.default_resolution)
+            || quality_resolutions(c.resolutions).map(|q| q[1]) != Some(c.default_resolution)
+        {
+            return Err(error(
+                "normal-quality jobs would not run at the default resolution: \
+                 order the resolution list so its middle entry is the default",
+            ));
+        }
         // PAPPL accepts mutable argv; own writable NUL-terminated storage.
         let mut storage: Vec<Vec<u8>> = args
             .iter()
@@ -333,6 +392,11 @@ impl Application {
                 ptr::null(),
                 1,
                 &mut driver,
+                // Q-17: `autoadd_cb` stays null on purpose. A device ID is
+                // self-reported and unauthenticated over both USB descriptor
+                // strings and mDNS, so anything that adds a destination on its
+                // own can be told what to be; the README already promises that
+                // the person picks the URI. `devices` lists, `add -v` commits.
                 None,
                 Some(driver_cb),
                 ptr::null(),
@@ -386,6 +450,17 @@ unsafe extern "C" fn system_cb(
             if !sys::papplSystemAddListeners(raw, c"127.0.0.1".as_ptr()) {
                 return Err(error("could not bind the loopback listener"));
             }
+            // Q-15: a probe run persists nothing. PAPPL's mainloop otherwise
+            // saves printers to `$XDG_CONFIG_HOME/<base name>.state` and
+            // re-creates them at the next startup, which was observed handing a
+            // printer created under the geometry probe to the SPL2 driver —
+            // the probe's `file:///` guard is only checked when the printer is
+            // created, not when it is reloaded. Installing a save callback
+            // suppresses the mainloop's state handling entirely, because it
+            // only installs its own `if (!system->save_cb)`.
+            if app.probe {
+                sys::papplSystemSetSaveCallback(raw, Some(discard_state), ptr::null_mut());
+            }
             // A file destination is how both drivers are exercised without
             // hardware: the probe writes JSON Lines to it, and the SPL2 driver
             // writes a stream that can be diffed against the golden corpus.
@@ -425,6 +500,15 @@ unsafe extern "C" fn system_cb(
             Ok(raw)
         })
     }
+}
+
+/// Probe mode's save callback: succeeds without writing anything.
+///
+/// PAPPL calls this whenever the system changes. Reporting success is correct
+/// here — nothing failed, there is simply nowhere a probe run's state should
+/// go. See Q-15 and the call site in `system_cb`.
+unsafe extern "C" fn discard_state(_system: *mut sys::pappl_system_t, _data: *mut c_void) -> bool {
+    unsafe { guard(ptr::null_mut(), false, || Ok(true)) }
 }
 
 struct System(*mut sys::pappl_system_t);
@@ -473,7 +557,19 @@ unsafe extern "C" fn driver_cb(
             data.rendjob_cb = Some(end_job);
             data.printfile_cb = Some(reject_raw);
             data.status_cb = Some(status);
-            data.format = c"application/x-pappl-geometry-probe".as_ptr();
+            // Q-16: the printer-specific format is the probe instrument's, and
+            // only the probe may advertise it. PAPPL publishes this string in
+            // `document-format-supported` and in the `CMD:` list of the
+            // IEEE-1284 device ID, so leaving it set for the SPL2 driver made
+            // a real printer announce a diagnostic MIME type it would then
+            // refuse. A null format is supported: `printer-driver.c` guards
+            // every use of it, and raw jobs fall back to
+            // `application/octet-stream`, which `reject_raw` still refuses.
+            data.format = if app.probe {
+                c"application/x-pappl-geometry-probe".as_ptr()
+            } else {
+                c"application/octet-stream".as_ptr()
+            };
             copy(&mut data.make_and_model, c.description)?;
             data.ppm = 20;
             data.kind = sys::PAPPL_KIND_DOCUMENT | sys::PAPPL_KIND_ENVELOPE;
@@ -492,8 +588,8 @@ unsafe extern "C" fn driver_cb(
                 data.x_resolution[i] = x;
                 data.y_resolution[i] = y;
             }
-            data.x_default = 600;
-            data.y_default = 600;
+            data.x_default = c.default_resolution.0;
+            data.y_default = c.default_resolution.1;
             data.left_right = c.margin;
             data.bottom_top = c.margin;
             data.borderless = false;
@@ -807,11 +903,77 @@ mod tests {
                 width: 21000,
                 length: 29700,
             }],
-            resolutions: &[(300, 300), (600, 600), (1200, 600), (1200, 1200)],
+            resolutions: &[(300, 300), (1200, 600), (600, 600), (1200, 1200)],
             sources: &[c"auto"],
             types: &[c"auto"],
             margin: 441,
+            default_resolution: (600, 600),
         }
+    }
+
+    #[test]
+    fn a_job_that_names_no_resolution_lands_on_the_declared_default() {
+        let c = capabilities();
+        let q = quality_resolutions(c.resolutions).unwrap();
+        assert_eq!(q[1], c.default_resolution, "normal quality");
+        assert_eq!(q[0], (300, 300), "draft quality");
+        assert_eq!(q[2], (1200, 1200), "high quality");
+    }
+
+    #[test]
+    fn a_resolution_list_whose_middle_is_not_the_default_is_refused() {
+        // The order this replaces is the one that shipped through P6, and it
+        // is what sent a 600 dpi document through a 1200x600 job (Q-14).
+        struct Never;
+        impl RasterDriver for Never {
+            fn start_job(&self, _: &Job<'_>, _: &RasterOptions, _: &mut Device<'_>) -> Result<()> {
+                unreachable!()
+            }
+            fn start_page(
+                &self,
+                _: &Job<'_>,
+                _: &RasterOptions,
+                _: &mut Device<'_>,
+                _: u32,
+            ) -> Result<()> {
+                unreachable!()
+            }
+            fn write_line(
+                &self,
+                _: &Job<'_>,
+                _: &RasterOptions,
+                _: &mut Device<'_>,
+                _: u32,
+                _: &[u8],
+            ) -> Result<()> {
+                unreachable!()
+            }
+            fn end_page(
+                &self,
+                _: &Job<'_>,
+                _: &RasterOptions,
+                _: &mut Device<'_>,
+                _: u32,
+            ) -> Result<()> {
+                unreachable!()
+            }
+            fn end_job(&self, _: &Job<'_>, _: &RasterOptions, _: &mut Device<'_>) -> Result<()> {
+                unreachable!()
+            }
+        }
+        let mut c = capabilities();
+        c.resolutions = &[(300, 300), (600, 600), (1200, 600), (1200, 1200)];
+        let app = Application {
+            capabilities: c,
+            driver: Box::new(Never),
+            probe: false,
+            probe_output: None,
+            port: 8631,
+            spool_directory: CString::new("/tmp").unwrap(),
+        };
+        // Rejected before the mainloop is entered, so no server is started.
+        let message = app.run(&[]).unwrap_err().to_string();
+        assert!(message.contains("normal-quality"), "{message}");
     }
     fn options() -> sys::pappl_pr_options_t {
         // Plain C fields, zero is a valid initialized representation.
