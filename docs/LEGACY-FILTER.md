@@ -1,6 +1,6 @@
 # Legacy CUPS filter reference
 
-The root package `samsung-2160-rust` retains `rastertospl-rust` for golden
+The root package `rastertospl-rust` retains `rastertospl-rust` for golden
 regression tests and hardware comparison until migration gate P11 passes.
 The PPD remains project data: tests compare its capabilities with the IPP table.
 Neither is installed by the 2.0 Debian package. The untouched 1.x version is
@@ -9,10 +9,10 @@ available on `legacy/cups-filter-1.x` and `v1.x-final`.
 Build and run the reference explicitly:
 
 ```sh
-cargo build --release -p samsung-2160-rust
+cargo build --release -p rastertospl-rust
 cupsfilter -p ppd/samsung-ml2160.ppd -m application/vnd.cups-raster -- doc.pdf > test.raster
 ./target/release/rastertospl-rust 101 testuser Test 1 "" test.raster > out.spl
-cargo test -p samsung-2160-rust golden
+cargo test -p rastertospl-rust golden
 ```
 
 The current reference uses 12.5 pt margins; historical 12 pt measurements do

@@ -27,7 +27,8 @@ inferred about the SPL2 wire format.
 
 ## 1. Current crate/module layout
 
-One binary crate, `samsung-2160-rust` (`Cargo.toml`), **zero third-party
+One binary crate, `rastertospl-rust` (`Cargo.toml`; called `samsung-2160-rust`
+when this audit was written), **zero third-party
 dependencies** (`Cargo.lock` contains only the crate itself). Three modules,
 5652 lines total, of which roughly 2947 are non-test.
 

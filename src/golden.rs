@@ -31,7 +31,7 @@
 //! ## Refreshing
 //!
 //! ```text
-//! UPDATE_GOLDENS=1 cargo test -p samsung-2160-rust golden
+//! UPDATE_GOLDENS=1 cargo test -p rastertospl-rust golden
 //! ```
 //!
 //! Goldens may ONLY be refreshed together with a deliberate behaviour change;
@@ -706,7 +706,7 @@ fn update_requested() -> bool {
 /// two produce the same bytes:
 ///
 /// ```text
-/// DUMP_GOLDEN_RASTER=/tmp/r cargo test -p samsung-2160-rust golden
+/// DUMP_GOLDEN_RASTER=/tmp/r cargo test -p rastertospl-rust golden
 /// ./target/release/rastertospl-rust 1 tester golden 1 '' /tmp/r/a4-600-marks.raster > /tmp/out.spl
 /// ```
 ///
@@ -735,7 +735,7 @@ fn compare_or_update(path: PathBuf, produced: &[u8], case_name: &str) {
 
     let expected = fs::read(&path).unwrap_or_else(|e| {
         panic!(
-            "could not read golden file: {} ({}). To produce it the first time: UPDATE_GOLDENS=1 cargo test -p samsung-2160-rust golden",
+            "could not read golden file: {} ({}). To produce it the first time: UPDATE_GOLDENS=1 cargo test -p rastertospl-rust golden",
             path.display(),
             e
         )
@@ -774,7 +774,7 @@ fn compare_or_update(path: PathBuf, produced: &[u8], case_name: &str) {
          produced   : {}\n\
          \n\
          The bytes going to the printer changed. If this is a DELIBERATE\n\
-         behaviour change, refresh with `UPDATE_GOLDENS=1 cargo test -p samsung-2160-rust golden`\n\
+         behaviour change, refresh with `UPDATE_GOLDENS=1 cargo test -p rastertospl-rust golden`\n\
          and include the diff in review; otherwise it is a regression.",
         case_name,
         path.display(),

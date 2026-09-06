@@ -8,7 +8,10 @@ members = ["crates/spl2-core", "crates/pappl-sys", "crates/pappl", "crates/ml216
 default-members = ["crates/ml216x-printer-app"]
 
 [package]
-name = "samsung-2160-rust"
+# Named for the binary it produces, which is what the PPD's `*cupsFilter` lines
+# and every golden invocation already say. It used to be samsung-2160-rust,
+# after the old repository name.
+name = "rastertospl-rust"
 version = "2.0.0-alpha"
 edition = "2021"
 description = "Legacy CUPS raster front end and golden regression harness for the ML-216x driver"

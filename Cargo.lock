@@ -22,7 +22,7 @@ name = "pappl-sys"
 version = "0.1.0"
 
 [[package]]
-name = "samsung-2160-rust"
+name = "rastertospl-rust"
 version = "2.0.0-alpha"
 dependencies = [
  "spl2-core",

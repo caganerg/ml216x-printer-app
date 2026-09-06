@@ -35,9 +35,10 @@ what stops and disables the root service of alpha-3 and earlier. `postinst`
 keeps a backstop for a *dangling* enablement symlink, and only a dangling one:
 a system unit someone installed by hand resolves to a real file and is left
 alone. The five branches of that condition were exercised in a scratch
-directory. The Rust crate names are untouched: the root crate is still
-`samsung-2160-rust` (the legacy filter) and `ml216x-printer-app` was already
-taken by the application crate.
+directory. The Rust crate names followed in a
+separate change: the root crate is now `rastertospl-rust`, after the binary it
+produces, because `ml216x-printer-app` was already taken by the application
+crate.
 
 One thing dpkg settled by rejecting it: `#` comment lines are not allowed in a
 binary package's control file (`dpkg-deb: error: parsing file … near line 12:

@@ -36,16 +36,16 @@ is ~16 MB).
 
 ```sh
 # Compare (the default; on every `cargo test --workspace` run)
-cargo test -p samsung-2160-rust golden
+cargo test -p rastertospl-rust golden
 
 # Refresh AFTER a deliberate behaviour change
-UPDATE_GOLDENS=1 cargo test -p samsung-2160-rust golden
+UPDATE_GOLDENS=1 cargo test -p rastertospl-rust golden
 
 # Verify the committed bytes (from the repository root)
 (cd goldens && sha256sum -c SHA256SUMS)
 
 # Export the inputs (for manual inspection / comparison with the installed binary)
-DUMP_GOLDEN_RASTER=/tmp/r cargo test -p samsung-2160-rust golden
+DUMP_GOLDEN_RASTER=/tmp/r cargo test -p rastertospl-rust golden
 ```
 
 Every diff in a `.spl` file means **the bytes going to the printer changed**.

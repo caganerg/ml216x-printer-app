@@ -28,7 +28,7 @@ the rules below exist because of that one fact.
 ## The bless discipline
 
 `goldens/` holds 32 frozen SPL2 streams and their sidecars.
-`cargo test -p samsung-2160-rust golden` compares against them; `UPDATE_GOLDENS=1 cargo test -p samsung-2160-rust golden`
+`cargo test -p rastertospl-rust golden` compares against them; `UPDATE_GOLDENS=1 cargo test -p rastertospl-rust golden`
 overwrites them. **Refreshing — "blessing" — a golden is a reviewed act, never
 a way to make a red build green.**
 
