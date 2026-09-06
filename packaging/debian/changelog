@@ -1,3 +1,15 @@
+samsung-ml2160-rust (2.0.0~alpha-3) unstable; urgency=medium
+
+  * Suppress system-config-printer's duplicate USB queue creation for the
+    hardware-confirmed Samsung 04e8:330f device. Keep the existing IPP queue
+    and preserve automatic setup for other USB devices.
+  * Reload udev rules on installation/removal without replaying device events.
+    Existing legacy queues must be removed explicitly by the administrator.
+  * Document successful hardware printing and CUPS network sharing, and the
+    duplicate queue observed on Debian testing with GNOME.
+
+ -- Çağan ERGÜN <caganergun@tutanota.com>  Sun, 06 Sep 2026 21:00:00 +0300
+
 samsung-ml2160-rust (2.0.0~alpha-2) unstable; urgency=medium
 
   * The package is now the printer application, not the CUPS filter. It

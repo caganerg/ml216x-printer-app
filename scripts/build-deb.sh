@@ -55,6 +55,8 @@ install -D -m 755 "$BINARY" "$STAGE/usr/bin/ml216x-printer-app"
 # /usr/lib, not /lib: trixie is usr-merged and DEP-17 wants the real path.
 install -D -m 644 packaging/systemd/ml216x-printer-app.service \
     "$STAGE/usr/lib/systemd/system/ml216x-printer-app.service"
+install -D -m 644 packaging/udev/71-ml216x-printer-app.rules \
+    "$STAGE/usr/lib/udev/rules.d/71-ml216x-printer-app.rules"
 install -D -m 644 packaging/debian/copyright "$STAGE/$DOC/copyright"
 gzip -9nc packaging/debian/changelog >"$STAGE/$DOC/changelog.Debian.gz"
 gzip -9nc README.md >"$STAGE/$DOC/README.md.gz"

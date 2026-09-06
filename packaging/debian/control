@@ -1,6 +1,6 @@
 Source: samsung-ml2160-rust
 Package: samsung-ml2160-rust
-Version: 2.0.0~alpha-2
+Version: 2.0.0~alpha-3
 Section: utils
 Priority: optional
 Architecture: amd64

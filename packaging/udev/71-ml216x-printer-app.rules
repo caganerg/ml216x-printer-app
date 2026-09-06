@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Samsung 04e8:330f is managed through the Printer Application's IPP queue.
+# Debian system-config-printer-udev's 70-printers.rules assigns a single
+# configure-printer service to SYSTEMD_WANTS for this USB device. Cancel only
+# that request, after 70-printers.rules, to avoid a second legacy USB queue.
+# ENV does not support -=. Match the single service and exclude whitespace
+# so unrelated or multiple systemd dependencies are never cleared.
+# Do not alter USB permissions, interface discovery, or other printer models.
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="04e8", ATTR{idProduct}=="330f", ENV{SYSTEMD_WANTS}=="configure-printer@usb-*.service", ENV{SYSTEMD_WANTS}!="*[[:space:]]*", ENV{SYSTEMD_WANTS}=""

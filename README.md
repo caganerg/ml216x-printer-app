@@ -3,7 +3,10 @@
 A PAPPL Printer Application for the Samsung ML-2160, ML-2165, ML-2165W and
 ML-2168 protocol family. It accepts jobs over IPP and emits SPL2/QPDL through
 PAPPL device transports. File and loopback socket output have been verified;
-USB and physical printing remain untested on the 2.0 path.
+the maintainer also reports successful hardware printing and CUPS network
+sharing. The package includes a USB auto-configuration exception for the
+hardware-confirmed `04e8:330f` device to prevent duplicate legacy queues;
+see [hardware test notes](docs/HARDWARE-TESTING.md).
 
 This is a development alpha. The selected **12.5 pt (4.41 mm)** margins still
 need hardware measurement (G-1), including vertical placement (Q-13).
@@ -72,7 +75,7 @@ maintainer scripts.
 ### Install it
 
 ```sh
-sudo apt install ./dist/samsung-ml2160-rust_2.0.0~alpha-2_amd64.deb
+sudo apt install ./dist/samsung-ml2160-rust_2.0.0~alpha-3_amd64.deb
 systemctl status ml216x-printer-app
 ```
 
@@ -110,6 +113,29 @@ sudo apt purge samsung-ml2160-rust      # also drops /var/lib/ml216x-printer-app
 
 `remove` leaves the printers you added on disk, so reinstalling brings them
 back; `purge` is what forgets them.
+
+## USB auto-configuration on Debian GNOME
+
+For Samsung USB ID `04e8:330f`, the package cancels the legacy queue-creation
+service requested by Debian's `70-printers.rules`. Physical USB access remains
+available to PAPPL. This is a device-specific desktop integration rule, not
+an installation of a PPD or automatic registration of a new PAPPL printer.
+Other USB IDs are unaffected; do not extrapolate the rule to an entire vendor.
+The existing IPP queue must still be configured as described above.
+
+When upgrading from alpha-2, first ensure the IPP queue works, then remove
+only the duplicate USB queue (use its actual name):
+
+```sh
+lpstat -v
+sudo lpadmin -x ML-2160-Series
+```
+
+Keep `ML2160`, whose URI is `ipp://127.0.0.1:8631/ipp/print/ML2160`.
+The package reloads udev rules; reconnect or power-cycle the printer after
+upgrading. Confirm that the duplicate queue and driver-search notification
+stay absent, and that printing still works. This hardware retest is pending.
+Removing the package restores the distribution's normal USB auto-setup rules.
 
 ## Print options
 

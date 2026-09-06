@@ -4,7 +4,10 @@
 
 **P6 is implemented: `spl2-core` is extracted and the SPL2 callbacks are
 connected.** The printer application now emits real SPL2/QPDL through PAPPL.
-No hardware print has been performed and release gate G-1 is still open, per
+The maintainer reports successful hardware printing and CUPS network sharing,
+but USB reconnect / power cycling creates a duplicate desktop queue. Removing
+that extra queue restores use of the existing IPP queue without reinstalling. See
+[hardware test notes](HARDWARE-TESTING.md). Release gate G-1 is still open per
 model; 12.5 pt remains the maintainer's selection, not a measurement.
 Do not ask again for permission to use 12.5 pt.
 
@@ -71,9 +74,11 @@ Corrects an earlier statement here that the application "can only reach a
   and closing with `\t` plus the UEL. Nothing in the code had to change for
   this; `papplSystemSetPrinterDrivers` is called only on the probe path, and
   `add` works regardless.
-* **USB is unexercised, not unimplemented.** No Samsung device is attached to
-  this machine, so `usb://` has never been opened. PAPPL's built-in USB scheme
-  is what would carry it.
+* **USB hardware feedback is now available.** The maintainer reports working
+  printing on their system, with a duplicate desktop queue after reconnect or
+  power cycling; deleting that extra queue restores use of the existing IPP queue.
+  No Samsung device is attached to the development host; model, USB IDs and
+  before/after queue details are still needed. See `docs/HARDWARE-TESTING.md`.
 * **The state file is PAPPL's, not ours.** The mainloop persists printers to
   `$XDG_CONFIG_HOME/ml216x-printer-app.state` and reloads them at startup
   without this repository calling either state function. A manual run that does
@@ -122,8 +127,8 @@ stream, a single flipped bit, and the old resolution order.
    `ml216x-printer-app devices` runs and lists nothing on this machine, which
    agrees with `docs/GOLDEN-VALIDATION.md` §4 — no Samsung device is attached,
    and `/dev/bus/usb` holds no node this user could open anyway. What is left
-   genuinely needs hardware: opening a `usb://` URI, and the IEEE-1284 device
-   ID the printer reports. **The udev rule cannot be written yet**, because a
+   needs hardware: diagnosing duplicate desktop queue creation, recording the
+   successful setup, and collecting the IEEE-1284 device ID. **The udev rule cannot be written yet**, because a
    rule needs the real vendor and product IDs and the only ones available now
    would be recalled rather than read off a device; the PPD records
    `MFG:Samsung;MDL:ML-2160 Series;CMD:SPL,FWV,EXT;` and says nothing about
@@ -163,7 +168,9 @@ how the output was captured, not a libpappl defect. Nothing to report.
 
 Keep the original filter in-tree until P11 passes; keep the PPD permanently.
 Hardware G-1 and open question Q-13 remain outstanding; Q-12 and Q-14 to Q-17
-are decided and implemented. No hardware print was performed.
+are decided and implemented. Hardware printing and CUPS sharing are now
+reported working by the maintainer; a device-scoped udev fix for confirmed USB ID `04e8:330f` is packaged in
+alpha-3; its reconnect/power-cycle hardware acceptance test remains open.
 
 Checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo fmt --all --check`, golden checksums, all three `p5-probe.py` modes

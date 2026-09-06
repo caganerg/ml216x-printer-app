@@ -9,6 +9,11 @@ configure)
     mkdir -p /var/spool/ml216x-printer-app
     chmod 700 /var/spool/ml216x-printer-app
 
+    # Apply to future hotplug events; never replay events for attached devices.
+    if command -v udevadm >/dev/null 2>&1 && [ -d /run/udev ]; then
+        udevadm control --reload-rules
+    fi
+
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload
         systemctl enable ml216x-printer-app.service

@@ -4,6 +4,9 @@ set -e
 
 case "$1" in
 remove)
+    if command -v udevadm >/dev/null 2>&1 && [ -d /run/udev ]; then
+        udevadm control --reload-rules || true
+    fi
     if [ -d /run/systemd/system ]; then
         systemctl disable ml216x-printer-app.service || true
         systemctl daemon-reload || true
