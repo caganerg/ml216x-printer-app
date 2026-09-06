@@ -14,9 +14,158 @@ answered. **Q-7 exists and is decided:** it asked whether the .deb should link
 libpappl statically or dynamically, and it is answered under Q-7 below (and
 folded into Q-1, which settled the same matter). Counting the decided entries
 as ten and treating Q-7 as unaccounted for is the arithmetic slip this note
-exists to prevent. **Q-12 through Q-17** were added later, by review and by
+exists to prevent. **Q-12 through Q-19** were added later, by review and by
 implementation rather than by the migration plan, and are the only entries
 outside the Q-1..Q-11 range.
+
+---
+
+## 2026-09-06 — Q-18 (DECIDED): the application runs entirely in user space
+
+**Question.** Up to 2.0.0~alpha-3 the package installed a systemd *system*
+unit with `User=root`. The maintainer's reading of the result was that the
+application "does not run entirely in user space", and asked for that fixed.
+Two shapes answer it, and they are not equivalent.
+
+**What was measured first, because the answer depends on it.** The binary was
+run as uid 1000 with `XDG_CONFIG_HOME` scoped to a temporary directory:
+
+* the IPP listener bound `127.0.0.1:18631` (confirmed with `ss -ltnp`, since
+  libpappl's own log line prints the port with its last digit missing);
+* the control socket appeared at `$TMPDIR/ml216x-printer-app1000.sock` — the
+  per-uid non-root path — and at `/tmp/ml216x-printer-app1000.sock` when
+  `TMPDIR` was unset;
+* the state file appeared at `$XDG_CONFIG_HOME/ml216x-printer-app.state`;
+* `devices`, `add -d TESTQ -m samsung_ml216x -v socket://127.0.0.1:9100` and
+  `status` all succeeded with no `sudo` anywhere.
+
+So **no line of this project's code required root.** The root requirement was
+entirely in the packaging: the unit's `User=root`, `/var/spool`, the
+`systemctl enable` in postinst, and the `sudo` in the README's own examples.
+The one thing that genuinely needs a privilege is opening the printer's USB
+node, and that is a permission on a device file, not a reason to be root.
+
+**Decision: a per-user systemd user service.** The package installs
+`/usr/lib/systemd/user/ml216x-printer-app.service` and enables it with
+`systemctl --global enable`; there is no system unit, no root process and no
+setuid binary. The spool is the unit's `RuntimeDirectory` under
+`$XDG_RUNTIME_DIR` at mode 0700, and the binary now also chmods whatever
+`--spool-directory` it is given to 0700, so the guarantee the old postinst's
+`chmod 700` gave a raster job — not readable by another local user — survives
+the move rather than being lost with the directory that carried it.
+
+USB access is granted by tagging the hardware-confirmed `04e8:330f` device
+`uaccess` in the packaged udev rule, so `systemd-logind` puts an ACL on
+`/dev/bus/usb/…` for the user of the active local session. Debian's
+`50-udev-default.rules` leaves that node `root:lp 0664`, which serves CUPS'
+root backend and is useless to a user who is not in group `lp`; `uaccess` is
+narrower than adding the user to `lp`, which would reach every USB printer on
+the machine. Group `lp` stays documented as the fallback for a headless machine,
+where there is no active local session for an ACL to be granted to.
+
+**The alternative that was offered and not taken** was to keep a system
+service but run it as a dedicated unprivileged account in group `lp`. It is
+the shape most printer daemons have, and it is session-independent. It was
+rejected because it is still a system service, which is not what "entirely in
+user space" asks for. What it buys — a queue that survives logout, for network
+sharing through CUPS — is available here through `loginctl enable-linger`, and
+the README says so.
+
+**What the decision costs, stated plainly.** The service lives and dies with
+the user's session unless lingering is enabled. Port 8631 is a single
+machine-wide resource, so a second user logging in gets a service that cannot
+bind and restarts on a loop until they give it another port with a drop-in;
+the README carries the recipe. Upgrades from alpha-3 must stop the old root
+service before the new user service can bind, which postinst does explicitly.
+
+## 2026-09-06 — Q-19 (DECIDED): the control socket is world-connectable
+
+**Raised by, and blocked on, the same change as Q-18.** It is not caused by
+it: the root service had the same property, one level worse.
+
+**Evidence.** Run as uid 1000 with `TMPDIR` unset, the server logs
+`Listening for connections on '/tmp/ml216x-printer-app1000.sock'` and the node
+is:
+
+```
+srwxrwxrwx 1 dev dev 0 Eyl  6 22:42 /tmp/ml216x-printer-app1000.sock
+```
+
+Mode `0777` on a `AF_UNIX` socket means any local user may connect. The
+subcommands that connect to it — `add`, `modify`, `delete`, `default`,
+`submit`, `shutdown` — are the server's entire control surface and carry no
+authentication of their own. The path is chosen by libpappl, not by this
+project: `%s/%s%d.sock` under `$TMPDIR` (falling back to `/tmp`) with the
+caller's uid for a non-root server, and `/run/%s.sock` for a root one — both
+strings are in `libpappl.so.1`. Under the root service of alpha-3 the same
+0777 socket sat in `/run`, where every local user could reach it, and could
+therefore drive a **root** server. Under a user service in `/tmp` a local user
+can drive **your** server. Neither is acceptable on a multi-user machine; the
+new one is strictly the smaller.
+
+**Candidate resolutions.**
+
+* **(a) Leave it.** libpappl's default, and identical to every other PAPPL
+  application on the machine. Costs nothing, fixes nothing. Defensible only if
+  multi-user hosts are declared out of scope, which the project has not said.
+* **(b) Set `Environment=TMPDIR=%t` in the unit**, putting the socket inside
+  `$XDG_RUNTIME_DIR`, which is mode 0700. Measured to work — that is where the
+  socket landed in the Q-18 experiments. The catch is the client: a subcommand
+  run from a shell where `TMPDIR` is unset would look in `/tmp` and find
+  nothing, so every documented command would need `TMPDIR` exported first.
+* **(c) Have the binary default `TMPDIR` to `$XDG_RUNTIME_DIR` when it is
+  unset**, before calling `papplMainloop`. Server and client are the same
+  binary and would agree by construction, so (b)'s catch disappears and no
+  documented command changes. The cost is a process-wide environment mutation
+  in a `#![forbid(unsafe_code)]` crate — safe in edition 2021 and done before
+  any thread exists, but still this project reaching around a library's own
+  path policy. The three probe scripts already set `TMPDIR` explicitly, so
+  they are unaffected either way.
+* **(d) Fix it upstream** — have libpappl create the socket 0600, or place it
+  under `$XDG_RUNTIME_DIR` itself — and carry (c) meanwhile. The right end
+  state, on someone else's schedule.
+
+**Recommended (c), then (d), and the maintainer delegated the decision back
+with "decide it yourself and implement it". Decision: (c), implemented.**
+(c) closes the exposure for both the service and the hand-run case without
+changing a single documented command, and (a) would leave a control surface
+open to every local account for no gain. (d) remains the right end state and
+is not this project's to schedule.
+
+**What (c) is, in the code.** `crates/ml216x-printer-app/src/runtime.rs`.
+`confine()` runs as the first statement of `run()` — before any thread exists,
+and before `std::env::temp_dir` is consulted, so the default spool directory
+follows the socket rather than staying behind in `/tmp`. The rules are:
+
+* an explicit `TMPDIR` always wins, so the three probe scripts, which scope it
+  to a temporary directory of their own, are untouched;
+* otherwise `$XDG_RUNTIME_DIR` is used **only if it is a directory with nothing
+  set for group or other**, which is what makes the 0777 socket inside it
+  unreachable by anyone else;
+* otherwise nothing is changed and the reason is printed to stderr, because a
+  control surface opening to every local account must not do so silently.
+
+Ownership is deliberately not checked. A runtime directory this user cannot
+write is a bind failure PAPPL reports out loud, not a quiet exposure, and
+reading the process uid would cost the crate its `#![forbid(unsafe_code)]`.
+
+**Measured after the change.** Started with `TMPDIR` unset and
+`XDG_RUNTIME_DIR=/run/user/1000`, the server logs `Listening for connections on
+'/run/user/1000/ml216x-printer-app1000.sock'`, no socket appears in `/tmp`, and
+`ml216x-printer-app status` run from a shell with no `TMPDIR` reaches it and
+answers. The decision logic has five tests in `runtime.rs`; both an accept-any-
+mode mutation and an ignore-`TMPDIR` mutation were applied and each turned the
+suite red before being reverted.
+
+**The residual, stated rather than hidden.** In a context with neither
+variable — a cron job, a session-less `su` — the client computes `/tmp` while a
+service started from a session is listening in `/run/user/<uid>`, so the
+subcommand reports "Server is not running" instead of connecting. It prints the
+warning first, and the README says to export
+`XDG_RUNTIME_DIR=/run/user/$(id -u)` there. That is the price of (c) over (a),
+and it is a visible failure rather than a silent one.
+
+See `S-4` in `docs/SECURITY-REVIEW.md` for the same evidence in review form.
 
 ---
 

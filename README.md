@@ -2,9 +2,11 @@
 
 A PAPPL Printer Application for the Samsung ML-2160, ML-2165, ML-2165W and
 ML-2168 protocol family. It accepts jobs over IPP and emits SPL2/QPDL through
-PAPPL device transports. File and loopback socket output have been verified;
-the maintainer also reports successful hardware printing and CUPS network
-sharing. The package includes a USB auto-configuration exception for the
+PAPPL device transports, and it runs entirely in user space: a systemd user
+service in your own session, as your own user, with no root process, no setuid
+binary and no `sudo` in any of the commands below. File and loopback socket
+output have been verified; the maintainer also reports successful hardware
+printing and CUPS network sharing. The package includes a USB auto-configuration exception for the
 hardware-confirmed `04e8:330f` device to prevent duplicate legacy queues;
 see [hardware test notes](docs/HARDWARE-TESTING.md).
 
@@ -41,12 +43,24 @@ converter, regression harness, or removal of an old manual installation, see
 ## Debian package (.deb)
 
 The package installs the **2.0 printer application**, not the 1.x filter: one
-binary at `/usr/bin/ml216x-printer-app`, a systemd unit at
-`/usr/lib/systemd/system/ml216x-printer-app.service`, and the usual
+binary at `/usr/bin/ml216x-printer-app`, a systemd **user** unit at
+`/usr/lib/systemd/user/ml216x-printer-app.service`, a udev rule at
+`/usr/lib/udev/rules.d/71-ml216x-printer-app.rules`, and the usual
 documentation under `/usr/share/doc/`. It installs **no CUPS filter and no
 PPD** — a printer application is driven over IPP, so nothing needs to live in
 CUPS' filter directory. The 1.x filter and the PPD stay in the source tree and
 can be built explicitly for regression testing.
+
+Installing the package is the only step that needs root, and only because apt
+writes to `/usr`. Nothing it installs runs as root: the service is started by
+your own `systemd --user`, PAPPL keeps its state in
+`$XDG_CONFIG_HOME/ml216x-printer-app.state` (`~/.config/…` by default), and its
+control socket and spool in `$XDG_RUNTIME_DIR`, which is yours alone. The
+socket goes there rather than into `/tmp` on purpose: libpappl creates it
+world-connectable, and its subcommands are the server's whole control surface
+(decision Q-19). Up to
+2.0.0~alpha-3 this was a root system service; see decision Q-18 in
+[`docs/DECISIONS.md`](docs/DECISIONS.md) for what changed and why.
 
 The binary is dynamically linked against the archive's `libpappl1t64` and
 glibc. The musl static build the 1.x package used is gone: vendoring or
@@ -75,14 +89,39 @@ maintainer scripts.
 ### Install it
 
 ```sh
-sudo apt install ./dist/samsung-ml2160-rust_2.0.0~alpha-3_amd64.deb
-systemctl status ml216x-printer-app
+sudo apt install ./dist/samsung-ml2160-rust_2.0.0~alpha-4_amd64.deb
+systemctl --user start ml216x-printer-app     # or just log out and back in
+systemctl --user status ml216x-printer-app
 ```
 
 Use `apt install ./…` rather than `dpkg -i`, so the library dependencies are
-resolved. Installing enables and starts the service; it listens on the loopback
-address at port 8631 and advertises itself over DNS-SD if `avahi-daemon` is
-running. Until you add a printer it does nothing else.
+resolved. Note the `--user` in every `systemctl` line: installing runs
+`systemctl --global enable`, which enables the service in every user's own
+service manager, so it starts by itself at the next login. It cannot be
+started from the package into a session that is already open, which is what
+the explicit `start` above is for.
+
+Once running it listens on the loopback address at port 8631 and advertises
+itself over DNS-SD if `avahi-daemon` is running. Until you add a printer it
+does nothing else.
+
+Two consequences of running in your session are worth knowing before you rely
+on it:
+
+* **It stops when your session ends.** If the machine shares the queue to the
+  network through CUPS and should keep doing so while nobody is logged in,
+  enable lingering once: `sudo loginctl enable-linger $USER`. The user manager
+  then starts at boot and the service with it.
+* **One user at a time on port 8631.** A second user logging in gets a service
+  that cannot bind, and it restarts on a five-second loop. Give that user
+  another port with a drop-in — `systemctl --user edit ml216x-printer-app`:
+
+  ```ini
+  [Service]
+  ExecStart=
+  ExecStart=/usr/bin/ml216x-printer-app --listen-port 8632 \
+      --spool-directory %t/ml216x-printer-app server
+  ```
 
 ### Add your printer
 
@@ -90,8 +129,19 @@ The service knows how to talk to the printer; it does not know where the
 printer is. That is one command, and the device URI is yours to choose:
 
 ```sh
-sudo ml216x-printer-app devices          # what is attached, if anything
-sudo ml216x-printer-app add -d ML2160 -m samsung_ml216x -v "$DEVICE_URI"
+ml216x-printer-app devices          # what is attached, if anything
+ml216x-printer-app add -d ML2160 -m samsung_ml216x -v "$DEVICE_URI"
+```
+
+No `sudo`: these subcommands reach the server over a socket in your runtime
+directory — `/run/user/$(id -u)/`, which only you can enter — and both ends are
+your own user. Running them under `sudo` would look for root's server instead
+and find nothing. If you run one where neither `TMPDIR` nor `XDG_RUNTIME_DIR`
+is set, such as a cron job or a session-less `su`, it prints a warning and
+reports that no server is running; export the runtime directory first:
+
+```sh
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
 ```
 
 `$DEVICE_URI` is a `usb://…` line copied from `devices`, or
@@ -104,27 +154,62 @@ The queue then appears to CUPS and to every other IPP client as
 `ipp://localhost:8631/ipp/print/ML2160`, and CUPS discovers it over DNS-SD
 without a PPD.
 
+If `devices` lists nothing while the printer is plugged in, the USB node's
+permissions are the thing to check; see
+[USB access without root](#usb-access-without-root) below.
+
 ### Remove it
 
 ```sh
-sudo apt remove samsung-ml2160-rust     # stops and disables the service
-sudo apt purge samsung-ml2160-rust      # also drops /var/lib/ml216x-printer-app.state
+systemctl --user stop ml216x-printer-app   # in each session that runs it
+sudo apt remove samsung-ml2160-rust        # disables it for future logins
+sudo apt purge samsung-ml2160-rust         # also drops the old root service's state
 ```
 
+Stop it yourself first: removal runs `systemctl --global disable`, which stops
+it from starting at the next login, but root cannot reach into an open session
+to stop a running user service.
+
 `remove` leaves the printers you added on disk, so reinstalling brings them
-back; `purge` is what forgets them.
+back. `purge` deletes only what the pre-alpha-4 **root** service owned —
+`/var/lib/ml216x-printer-app.state` and `/var/spool/ml216x-printer-app`. Your
+own printers are yours: they live in `~/.config/ml216x-printer-app.state`, and
+no package script touches a home directory. Delete that file to forget them.
+
+## USB access without root
+
+Debian's `50-udev-default.rules` gives a USB printer-class device
+`root:lp 0664`. That is what CUPS' own backend needs, because it runs as root;
+a printer application running as you is not in group `lp` and cannot open
+`/dev/bus/usb/…` at all. So the package's udev rule tags the
+hardware-confirmed `04e8:330f` device `uaccess`, and `systemd-logind` puts an
+ACL for the user of the active local session on that node. Nothing else is
+changed: not the owner, not the mode, not any other device.
+
+This works for someone logged in at the machine. It does not work over SSH
+with nobody at the console, because there is no active local session to grant
+the ACL to. For a headless machine, put the user in group `lp` instead and
+have them log in again:
+
+```sh
+sudo adduser "$USER" lp
+```
+
+Group `lp` is the wider grant of the two — it reaches every USB printer on the
+machine, not just this one — which is why it is the fallback rather than the
+default.
 
 ## USB auto-configuration on Debian GNOME
 
-For Samsung USB ID `04e8:330f`, the package cancels the legacy queue-creation
-service requested by Debian's `70-printers.rules`. Physical USB access remains
-available to PAPPL. This is a device-specific desktop integration rule, not
-an installation of a PPD or automatic registration of a new PAPPL printer.
+For Samsung USB ID `04e8:330f`, the package also cancels the legacy
+queue-creation service requested by Debian's `70-printers.rules`. This is a
+device-specific desktop integration rule, not an installation of a PPD or
+automatic registration of a new PAPPL printer.
 Other USB IDs are unaffected; do not extrapolate the rule to an entire vendor.
 The existing IPP queue must still be configured as described above.
 
-When upgrading from alpha-2, first ensure the IPP queue works, then remove
-only the duplicate USB queue (use its actual name):
+When upgrading from alpha-2 or alpha-3, first ensure the IPP queue works, then
+remove only the duplicate USB queue (use its actual name):
 
 ```sh
 lpstat -v
@@ -190,14 +275,18 @@ and [golden validation](docs/GOLDEN-VALIDATION.md).
   V1/V2/V3 parser, behind the `golden-replay` feature)
 - `crates/pappl-sys/`, `crates/pappl/` — hand-written FFI for libpappl 1.3 and
   the safe wrapper that owns every `unsafe` line and the callback boundary
-- `crates/ml216x-printer-app/` — the 2.0 binary: the SPL2 raster driver and the
-  capability table
+- `crates/ml216x-printer-app/` — the 2.0 binary: the SPL2 raster driver, the
+  capability table, and `runtime.rs`, which keeps the control socket out of
+  a shared directory (Q-19)
 - `src/main.rs`, `src/golden.rs` — the frozen 1.x CUPS filter front end and the
   golden-file harness that pins its output
 - `ppd/samsung-ml2160.ppd` — CUPS PPD for the 1.x queue; kept permanently as
   project data
 - `packaging/debian/` — `control`, `copyright`, `changelog` and the maintainer
-  scripts; `packaging/systemd/` — the service unit
+  scripts; `packaging/systemd/user/` — the user unit the package installs
+  (`packaging/systemd/ml216x-printer-app.service` is the retired root system
+  unit, kept as a record and no longer installed); `packaging/udev/` — the
+  device-scoped rules
 - `scripts/` — `build-deb.sh` builds the package; `p5-probe.py` and
   `transport-probe.py` drive the printer application over loopback
 

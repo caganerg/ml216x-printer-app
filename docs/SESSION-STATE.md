@@ -2,6 +2,29 @@
 
 *Updated 2026-09-06.*
 
+**The application now runs entirely in user space (2.0.0~alpha-4,
+decision Q-18).** The package installs a systemd *user* unit, enables it with
+`systemctl --global enable`, and installs no system unit: no root process, no
+setuid binary, state in each user's `$XDG_CONFIG_HOME`, spool in a 0700
+`RuntimeDirectory` under `$XDG_RUNTIME_DIR`, and USB access through a
+`uaccess` udev tag on the hardware-confirmed `04e8:330f` device rather than
+through privilege. This closes S-3 in `docs/SECURITY-REVIEW.md`.
+
+It also raised and then settled **Q-19**: libpappl creates the control socket
+mode 0777, so in `/tmp` any local user could drive the server — true of the old
+root service too, and worse there. The maintainer delegated the decision, and
+candidate (c) is implemented: `crates/ml216x-printer-app/src/runtime.rs` points
+`TMPDIR` at `$XDG_RUNTIME_DIR` when the caller has set none and that directory
+is private, so the socket lands somewhere only its owner can reach. An explicit
+`TMPDIR` still wins — the probe scripts rely on it — and a context with neither
+variable gets a warning rather than a silent exposure. S-4 is contained, not
+fixed: the socket's mode is still libpappl's, and the upstream half belongs
+with the S-1/S-2 bug report.
+
+The packaging change itself is **not yet installed or tested on a machine**;
+`sh -n`, a package build, and running the binary by hand are all that has been
+done.
+
 **P6 is implemented: `spl2-core` is extracted and the SPL2 callbacks are
 connected.** The printer application now emits real SPL2/QPDL through PAPPL.
 The maintainer reports successful hardware printing and CUPS network sharing,
@@ -84,6 +107,13 @@ Corrects an earlier statement here that the application "can only reach a
   without this repository calling either state function. A manual run that does
   not scope `XDG_CONFIG_HOME` writes into the user's real `~/.config`; only
   `scripts/p5-probe.py` scopes it today.
+* **Nothing in this project's code needs root** (measured 2026-09-06, and the
+  basis of decision Q-18). Run as uid 1000, the server binds the loopback port
+  — verified with `ss -ltnp`, because libpappl's own log line prints the port
+  with its last digit missing — puts its control socket at
+  `$TMPDIR/ml216x-printer-app<uid>.sock`, its state at
+  `$XDG_CONFIG_HOME/ml216x-printer-app.state`, and answers `devices`, `add` and
+  `status` with no `sudo`. The root requirement was entirely in the packaging.
 
 ## P7 so far — the job-geometry contract, closed
 
@@ -134,16 +164,21 @@ stream, a single flipped bit, and the old resolution order.
    `MFG:Samsung;MDL:ML-2160 Series;CMD:SPL,FWV,EXT;` and says nothing about
    USB IDs. Take them from `lsusb` at bring-up (P12) and write the rule then.
    Socket transport, by contrast, is proven end to end.
-2. ~~**Packaging for the printer application**~~ — **done**, except the USB
-   permission story, which waits on the same missing IDs as item 1. The `.deb`
+2. ~~**Packaging for the printer application**~~ — **done**, and the USB
+   permission story is now answered rather than pending: the maintainer
+   supplied `04e8:330f`, so the packaged udev rule tags that one device
+   `uaccess` and the logged-in user can open its `/dev/bus/usb` node without
+   being root and without group `lp` (Q-18). It needs the same hardware
+   acceptance run as the duplicate-queue rule. The `.deb`
    installs `/usr/bin/ml216x-printer-app` and a systemd unit and ships neither
    filter nor PPD (Q-5's clean break for what we ship); dependencies are stated
    explicitly, because the hand-built package path never substitutes
    `${shlibs:Depends}` — the old control would have shipped that literal string
    to users. `scripts/build-deb.sh` builds it and checks the libpappl range
-   first. The service runs as root for now, with the reason written in the unit
-   file. The maintainer scripts pass `sh -n` but have not been executed: doing
-   so installs a system service on the development machine.
+   first. The service no longer runs as root at all; the unit that
+   did is kept in the tree, marked not installed, as the record. The maintainer
+   scripts pass `sh -n` but have not been executed: doing so installs a service
+   on the development machine.
 3. ~~**P9's raster-type and dithering review**~~ — **done.** `BLACK_1` stays
    (the engine is 1-bit only), and the dithering path is reachable rather than
    avoidable: forcing `BLACK_1` selects it. The review confirmed the two

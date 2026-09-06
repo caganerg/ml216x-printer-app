@@ -5,11 +5,18 @@
 use pappl::application::{Application, Capabilities, GeometryProbe, RasterDriver};
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::PermissionsExt;
 
 mod driver;
 mod media_table;
+mod runtime;
 
 fn run() -> Result<i32, Box<dyn std::error::Error>> {
+    // Before anything reads TMPDIR — `std::env::temp_dir` below included — and
+    // while this process is still single threaded. Decision Q-19: PAPPL puts
+    // its control socket in $TMPDIR at mode 0777, so leaving that at /tmp hands
+    // every local account the server's whole control surface.
+    runtime::confine();
     let mut args = Vec::new();
     let mut probe = false;
     let mut probe_output = None;
@@ -67,7 +74,37 @@ fn run() -> Result<i32, Box<dyn std::error::Error>> {
     } else {
         Box::new(driver::Spl2Driver::new())
     };
+    // A raster job is written into the spool before it is converted, so it
+    // must not be readable by another local user. `create_dir_all` applies the
+    // umask and leaves 0755 (or 0775) under an ordinary login; the root
+    // service that ran until 2.0.0~alpha-3 got this guarantee from postinst's
+    // `chmod 700 /var/spool/ml216x-printer-app`, and moving into the user's
+    // session must not lose it (decision Q-18). The packaged unit creates the
+    // directory itself as a 0700 RuntimeDirectory, so this is the backstop for
+    // a manual run.
+    //
+    // Only a directory this process created is chmodded. `--spool-directory`
+    // takes any path, and silently tightening one the caller already had —
+    // `/tmp`, or a directory shared with something else — would be a worse
+    // surprise than the one being prevented. An existing directory is reported
+    // instead, on stderr, which is the journal under the unit and the terminal
+    // for a hand-run server.
+    let created = !spool.exists();
     std::fs::create_dir_all(&spool)?;
+    if created {
+        std::fs::set_permissions(&spool, std::fs::Permissions::from_mode(0o700))?;
+    } else {
+        let mode = std::fs::metadata(&spool)?.permissions().mode();
+        if mode & 0o077 != 0 {
+            eprintln!(
+                "ml216x-printer-app: warning: spool directory {} is mode {:04o}, \
+                 so other local users can read the raster of every job passing \
+                 through it; 0700 is what this expects",
+                spool.display(),
+                mode & 0o7777
+            );
+        }
+    }
     let app = Application {
         capabilities: Capabilities {
             // Q-15: the two drivers do not share a name, so a printer saved by

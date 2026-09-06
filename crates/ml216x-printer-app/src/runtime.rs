@@ -1,0 +1,188 @@
+// SPDX-License-Identifier: GPL-2.0-only
+
+//! Where PAPPL's control socket is allowed to live (decision Q-19).
+//!
+//! PAPPL puts a non-root server's control socket at `$TMPDIR/<name><uid>.sock`,
+//! falling back to `/tmp` when `TMPDIR` is unset, and creates it mode 0777.
+//! In `/tmp` that means **any local user may connect to it**, and the
+//! subcommands reached through it — `add`, `modify`, `delete`, `default`,
+//! `submit`, `shutdown` — are the whole control surface of the server, with no
+//! authentication of their own. Measured, not inferred: a server run as uid
+//! 1000 with `TMPDIR` unset logs
+//! `Listening for connections on '/tmp/ml216x-printer-app1000.sock'` and the
+//! node is `srwxrwxrwx`.
+//!
+//! `$XDG_RUNTIME_DIR` is the per-user directory the login session already owns
+//! at mode 0700, so pointing `TMPDIR` at it closes that without changing a
+//! single documented command: the server and the client subcommands are the
+//! same binary and compute the socket path the same way. An explicit `TMPDIR`
+//! always wins, so a caller that scopes it — every probe script under
+//! `scripts/` does — keeps its own directory.
+//!
+//! Where no such directory exists the socket stays where PAPPL would have put
+//! it and the reason is printed, because a control surface quietly opening to
+//! every local account is exactly the kind of thing that must not be silent.
+
+use std::ffi::OsStr;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+
+/// What to do with `TMPDIR` before handing control to PAPPL.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SocketDir {
+    /// `TMPDIR` is set by the caller and is left exactly as it is.
+    Explicit,
+    /// Set `TMPDIR` to this directory: it is reserved to this user.
+    Confine(PathBuf),
+    /// Nothing suitable was found; the socket lands wherever PAPPL puts it and
+    /// other local users can reach it. Carries the sentence to print.
+    Exposed(String),
+}
+
+/// Decide the socket directory from the environment.
+///
+/// `probe` reports `(is_dir, mode)` for a path, or `None` if it cannot be
+/// examined; it is a parameter so the decision can be tested without a
+/// filesystem. Split out from [`confine`] for the same reason: the mutation of
+/// a process-wide environment variable is not something to run inside a test
+/// harness that uses threads.
+pub fn choose(
+    tmpdir: Option<&OsStr>,
+    runtime_dir: Option<&OsStr>,
+    probe: impl FnOnce(&Path) -> Option<(bool, u32)>,
+) -> SocketDir {
+    if tmpdir.is_some_and(|value| !value.is_empty()) {
+        return SocketDir::Explicit;
+    }
+    let Some(dir) = runtime_dir.filter(|value| !value.is_empty()) else {
+        return SocketDir::Exposed(
+            "neither TMPDIR nor XDG_RUNTIME_DIR is set, so PAPPL's control socket \
+             lands in /tmp at mode 0777, where any local user can drive this server"
+                .into(),
+        );
+    };
+    let path = PathBuf::from(dir);
+    match probe(&path) {
+        // Group and other must have nothing. Ownership needs no check: a
+        // directory this user cannot write is a bind failure PAPPL reports, not
+        // a quiet exposure, and reading the process uid would cost this crate
+        // its `forbid(unsafe_code)`.
+        Some((true, mode)) if mode & 0o077 == 0 => SocketDir::Confine(path),
+        Some((true, mode)) => SocketDir::Exposed(format!(
+            "XDG_RUNTIME_DIR {} is mode {:04o} rather than 0700, so PAPPL's control \
+             socket is left in /tmp, where any local user can drive this server",
+            path.display(),
+            mode & 0o7777
+        )),
+        _ => SocketDir::Exposed(format!(
+            "XDG_RUNTIME_DIR {} is not a directory, so PAPPL's control socket is \
+             left in /tmp, where any local user can drive this server",
+            path.display()
+        )),
+    }
+}
+
+/// Apply [`choose`] to this process, warning on stderr when it cannot help.
+///
+/// Called once, at the top of `main`, before any thread exists and before
+/// anything reads `TMPDIR` — including `std::env::temp_dir`, so the default
+/// spool directory follows the socket into the same per-user directory.
+pub fn confine() {
+    let decision = choose(
+        std::env::var_os("TMPDIR").as_deref(),
+        std::env::var_os("XDG_RUNTIME_DIR").as_deref(),
+        |path| {
+            std::fs::metadata(path)
+                .ok()
+                .map(|meta| (meta.is_dir(), meta.permissions().mode()))
+        },
+    );
+    match decision {
+        SocketDir::Explicit => {}
+        SocketDir::Confine(path) => std::env::set_var("TMPDIR", path),
+        SocketDir::Exposed(reason) => {
+            eprintln!("ml216x-printer-app: warning: {reason}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    fn dir(mode: u32) -> impl FnOnce(&Path) -> Option<(bool, u32)> {
+        move |_| Some((true, mode))
+    }
+
+    /// A caller that scopes `TMPDIR` keeps it. The probe scripts depend on
+    /// this: they point both ends at a temporary directory of their own.
+    #[test]
+    fn an_explicit_tmpdir_is_never_overridden() {
+        let tmpdir = OsString::from("/scoped/by/the/caller");
+        assert_eq!(
+            choose(
+                Some(&tmpdir),
+                Some(OsStr::new("/run/user/1000")),
+                dir(0o40700)
+            ),
+            SocketDir::Explicit
+        );
+    }
+
+    /// The case the decision exists for: a 0700 runtime directory takes the
+    /// socket out of `/tmp`.
+    #[test]
+    fn a_private_runtime_directory_is_used() {
+        assert_eq!(
+            choose(None, Some(OsStr::new("/run/user/1000")), dir(0o40700)),
+            SocketDir::Confine(PathBuf::from("/run/user/1000"))
+        );
+    }
+
+    /// An empty variable is not a directory name.
+    #[test]
+    fn an_empty_tmpdir_does_not_count_as_set() {
+        let empty = OsString::new();
+        assert_eq!(
+            choose(
+                Some(&empty),
+                Some(OsStr::new("/run/user/1000")),
+                dir(0o40700)
+            ),
+            SocketDir::Confine(PathBuf::from("/run/user/1000"))
+        );
+    }
+
+    /// A runtime directory others can enter buys nothing, and saying so is the
+    /// point: the exposure is reported rather than papered over.
+    #[test]
+    fn a_group_or_world_accessible_runtime_directory_is_refused() {
+        for mode in [0o40750, 0o40705, 0o40777] {
+            let SocketDir::Exposed(reason) =
+                choose(None, Some(OsStr::new("/run/user/1000")), dir(mode))
+            else {
+                panic!("mode {mode:o} was accepted");
+            };
+            assert!(reason.contains("rather than 0700"), "{reason}");
+        }
+    }
+
+    /// Nothing to fall back to: still not silent.
+    #[test]
+    fn a_missing_runtime_directory_is_reported() {
+        let SocketDir::Exposed(reason) = choose(None, None, dir(0o40700)) else {
+            panic!("a missing XDG_RUNTIME_DIR was accepted");
+        };
+        assert!(
+            reason.contains("neither TMPDIR nor XDG_RUNTIME_DIR"),
+            "{reason}"
+        );
+
+        let SocketDir::Exposed(reason) = choose(None, Some(OsStr::new("/run/user/1000")), |_| None)
+        else {
+            panic!("an unexaminable XDG_RUNTIME_DIR was accepted");
+        };
+        assert!(reason.contains("is not a directory"), "{reason}");
+    }
+}

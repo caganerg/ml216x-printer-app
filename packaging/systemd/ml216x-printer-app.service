@@ -1,3 +1,13 @@
+# NOT INSTALLED as of 2.0.0~alpha-4. The package now ships the user unit in
+# packaging/systemd/user/ instead: the application runs in the user's own
+# session, as the user, with no root anywhere in the path. This file is kept in
+# the source tree because it is the only written record of what the root
+# service did and why, and because a machine that wants one always-on shared
+# queue rather than a per-login one can still install it by hand. Nothing in
+# scripts/build-deb.sh or the maintainer scripts references it any more; if it
+# is installed by hand it must not run at the same time as a user service,
+# because both bind port 8631.
+#
 [Unit]
 Description=Samsung ML-216x Printer Application
 Documentation=https://github.com/caganerg/samsung-ml2160-rust

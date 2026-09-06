@@ -5,5 +5,18 @@
 # that request, after 70-printers.rules, to avoid a second legacy USB queue.
 # ENV does not support -=. Match the single service and exclude whitespace
 # so unrelated or multiple systemd dependencies are never cleared.
-# Do not alter USB permissions, interface discovery, or other printer models.
+# This first rule alters no permissions and no interface discovery, and no
+# rule in this file touches any other printer model. The access rule below
+# is the one that grants a permission, and it is scoped to the same device.
 ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="04e8", ATTR{idProduct}=="330f", ENV{SYSTEMD_WANTS}=="configure-printer@usb-*.service", ENV{SYSTEMD_WANTS}!="*[[:space:]]*", ENV{SYSTEMD_WANTS}=""
+
+# Give the user of the active local session read/write access to this printer's
+# USB node, so the printer application can open a usb:// device without root.
+# Debian's 50-udev-default.rules already sets root:lp 0664 on a USB
+# printer-class device, which is what CUPS' own root backend uses; a printer
+# application running as the user is not in group lp and needs an ACL instead.
+# `uaccess` grants exactly that, to the active seat's user only, for this
+# device only. It is matched on every non-remove event rather than only on add,
+# because a `change` event re-runs the rules and a tag that stops matching is
+# dropped from the udev database, taking the ACL with it.
+ACTION!="remove", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="04e8", ATTR{idProduct}=="330f", TAG+="uaccess"

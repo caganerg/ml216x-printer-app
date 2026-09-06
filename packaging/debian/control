@@ -1,6 +1,6 @@
 Source: samsung-ml2160-rust
 Package: samsung-ml2160-rust
-Version: 2.0.0~alpha-3
+Version: 2.0.0~alpha-4
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -18,9 +18,14 @@ Description: Printer application for Samsung ML-216x laser printers
  QPDL v3 format: PJL job envelope, 17-byte page header, Algo 0x11
  RLE-compressed band records and checksums.
  .
- It runs as a system service on the loopback address, advertises itself over
- DNS-SD, and prints to a printer reached by a socket:// or usb:// device URI
- that you choose yourself. No CUPS filter and no PPD are installed: any IPP
+ It runs entirely in user space: a systemd user service in your own session,
+ as your own user, with no root process and no setuid binary anywhere in the
+ path. It serves IPP on the loopback address, advertises itself over DNS-SD,
+ and prints to a printer reached by a socket:// or usb:// device URI that you
+ choose yourself. Its state lives in your $XDG_CONFIG_HOME and its spool in
+ your runtime directory. A packaged udev rule tags the hardware-confirmed
+ Samsung 04e8:330f USB device for uaccess, so the logged-in user can open it
+ without being in group lp. No CUPS filter and no PPD are installed: any IPP
  client, CUPS included, drives it over IPP.
  .
  This is a 2.0 alpha. The hard margins it uses are derived from the classic

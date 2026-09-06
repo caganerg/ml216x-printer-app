@@ -2,12 +2,23 @@
 # SPDX-License-Identifier: GPL-2.0-only
 set -e
 
+UNIT=ml216x-printer-app.service
+
 case "$1" in
 configure)
-    # The spool directory is the service's, not a user's: a raster job is
-    # written here before it is converted, so it must not be world readable.
-    mkdir -p /var/spool/ml216x-printer-app
-    chmod 700 /var/spool/ml216x-printer-app
+    # Up to and including 2.0.0~alpha-3 this package installed a system unit
+    # that ran the application as root. That unit is gone from the package, but
+    # dpkg does not stop a running service or remove the enablement symlink an
+    # earlier postinst created, and the root server would go on holding port
+    # 8631 against the user service that replaces it. Stop it while it is still
+    # loaded, then drop what enabled it.
+    if [ -n "$2" ] && dpkg --compare-versions "$2" lt "2.0.0~alpha-4"; then
+        if [ -d /run/systemd/system ]; then
+            systemctl stop "$UNIT" || true
+            systemctl disable "$UNIT" || true
+        fi
+        rm -f "/etc/systemd/system/multi-user.target.wants/$UNIT"
+    fi
 
     # Apply to future hotplug events; never replay events for attached devices.
     if command -v udevadm >/dev/null 2>&1 && [ -d /run/udev ]; then
@@ -16,10 +27,12 @@ configure)
 
     if [ -d /run/systemd/system ]; then
         systemctl daemon-reload
-        systemctl enable ml216x-printer-app.service
-        # `restart` rather than `start`, so an upgrade actually runs the new
-        # binary instead of leaving the old one serving.
-        systemctl restart ml216x-printer-app.service
+        # Enable it in every user's `systemd --user` manager, which is all a
+        # package can do from here: root cannot start a service inside a
+        # session it does not belong to. A new login starts it by itself, and
+        # an already open session picks it up with
+        # `systemctl --user start ml216x-printer-app`.
+        systemctl --global enable "$UNIT" || true
     fi
     ;;
 

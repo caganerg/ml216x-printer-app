@@ -1,3 +1,37 @@
+samsung-ml2160-rust (2.0.0~alpha-4) unstable; urgency=medium
+
+  * The application now runs entirely in user space (decision Q-18). The
+    package installs a systemd *user* unit at /usr/lib/systemd/user and
+    enables it with `systemctl --global enable`; it no longer installs a
+    system unit and no longer runs anything as root. PAPPL keeps its state in
+    $XDG_CONFIG_HOME/ml216x-printer-app.state and its control socket in
+    $TMPDIR, so `devices`, `add`, `status` and the rest work without sudo.
+  * The spool moves from /var/spool/ml216x-printer-app to the service's
+    RuntimeDirectory under $XDG_RUNTIME_DIR, created 0700. The binary now also
+    sets 0700 on whatever --spool-directory it is given, so a manual run keeps
+    the guarantee the old postinst's `chmod 700` provided: a raster job waiting
+    to be converted is not readable by another local user.
+  * The udev rule for the hardware-confirmed Samsung 04e8:330f device now also
+    tags it `uaccess`, so the user of the active local session can open its
+    /dev/bus/usb node. Debian's own rule leaves it root:lp 0664, which serves
+    CUPS' root backend but not a printer application running as the user.
+    Nothing changes for any other device.
+  * The control socket moves out of /tmp (decision Q-19). libpappl creates it
+    mode 0777, and the subcommands reached through it are the server's whole
+    control surface, so in /tmp any local user could drive the server — as they
+    could drive the root server this release replaces. The binary now points
+    TMPDIR at $XDG_RUNTIME_DIR when the caller has set none and that directory
+    is private, so the socket sits where only its owner can reach it. An
+    explicit TMPDIR still wins, and a context with neither variable gets a
+    warning rather than a silent exposure.
+  * Upgrading from 2.0.0~alpha-3 or earlier stops and disables the old root
+    service before enabling the user one, because the root server would
+    otherwise keep port 8631 and the replacement would fail to bind. Purging
+    still removes the root service's /var/lib state and /var/spool directory;
+    it never touches per-user state in a home directory.
+
+ -- Çağan ERGÜN <caganergun@tutanota.com>  Sun, 06 Sep 2026 22:45:00 +0300
+
 samsung-ml2160-rust (2.0.0~alpha-3) unstable; urgency=medium
 
   * Suppress system-config-printer's duplicate USB queue creation for the

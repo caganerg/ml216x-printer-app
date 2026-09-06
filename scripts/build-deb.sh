@@ -52,9 +52,12 @@ chmod 755 "$STAGE"
 DOC=usr/share/doc/samsung-ml2160-rust
 
 install -D -m 755 "$BINARY" "$STAGE/usr/bin/ml216x-printer-app"
-# /usr/lib, not /lib: trixie is usr-merged and DEP-17 wants the real path.
-install -D -m 644 packaging/systemd/ml216x-printer-app.service \
-    "$STAGE/usr/lib/systemd/system/ml216x-printer-app.service"
+# /usr/lib/systemd/user, not .../system: the application runs as a user
+# service in the user's own session, so there is no root process anywhere in
+# the path (decision Q-18). /usr/lib rather than /lib because trixie is
+# usr-merged and DEP-17 wants the real path.
+install -D -m 644 packaging/systemd/user/ml216x-printer-app.service \
+    "$STAGE/usr/lib/systemd/user/ml216x-printer-app.service"
 install -D -m 644 packaging/udev/71-ml216x-printer-app.rules \
     "$STAGE/usr/lib/udev/rules.d/71-ml216x-printer-app.rules"
 install -D -m 644 packaging/debian/copyright "$STAGE/$DOC/copyright"

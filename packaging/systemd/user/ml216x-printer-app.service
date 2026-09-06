@@ -1,0 +1,37 @@
+[Unit]
+Description=Samsung ML-216x Printer Application
+Documentation=https://github.com/caganerg/samsung-ml2160-rust
+# There is no ordering against avahi-daemon.service here, and there cannot be:
+# that is a system unit and a user manager cannot order against one. Avahi only
+# publishes the queue over DNS-SD; without it the application still serves IPP
+# on the loopback address. In practice the system bus and Avahi are up long
+# before a user session starts.
+
+[Service]
+Type=simple
+# %t is the user's XDG_RUNTIME_DIR. systemd creates this directory before the
+# service starts and removes it when the service stops. The mode matters: a
+# raster job is written into the spool before it is converted, so it must not
+# be readable by another local user. The root service this replaces got the
+# same guarantee from postinst's `chmod 700 /var/spool/ml216x-printer-app`.
+RuntimeDirectory=ml216x-printer-app
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/ml216x-printer-app --spool-directory %t/ml216x-printer-app server
+Restart=on-failure
+RestartSec=5
+
+# No User= line, deliberately: this is a user unit, so it runs as whoever's
+# `systemd --user` started it and never as root. PAPPL then keeps its state in
+# $XDG_CONFIG_HOME/ml216x-printer-app.state and its control socket in
+# $TMPDIR/ml216x-printer-app<uid>.sock instead of /var/lib and /run, which is
+# what makes the client subcommands work without sudo. Opening a usb:// device
+# means opening a node under /dev/bus/usb, and the packaged udev rule tags the
+# hardware-confirmed 04e8:330f device `uaccess` so the logged-in user has it.
+NoNewPrivileges=true
+# ProtectHome= and PrivateTmp= are both unusable here rather than merely
+# omitted. ProtectHome would hide $XDG_CONFIG_HOME, which is where the printers
+# you add are persisted; PrivateTmp would hide the control socket from the
+# client subcommands you run in your own shell.
+
+[Install]
+WantedBy=default.target

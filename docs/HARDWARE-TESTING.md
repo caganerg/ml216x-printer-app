@@ -80,3 +80,34 @@ Pending acceptance on the maintainer's hardware: upgrade to alpha-3, remove
 only `ML-2160-Series`, reconnect and power-cycle, then verify that only the
 working IPP queue remains and local/network printing still works. Do not mark
 this passed from a syntax check or package build.
+
+## USB access as the user — alpha-4, pending the same hardware
+
+Decision Q-18 moved the application out of root and into the user's own
+session, so opening the printer is now a permission question. The same udev
+file gained one rule: the `04e8:330f` device is tagged `uaccess`, and
+`systemd-logind` then puts an ACL for the active local session's user on its
+`/dev/bus/usb` node. Debian's `50-udev-default.rules` otherwise leaves that
+node `root:lp 0664`, which a user who is not in group `lp` cannot open.
+
+None of this is verified on hardware, and it cannot be here: no Samsung device
+is attached to the development host, so no node exists to carry an ACL. What
+was verified is the surrounding mechanism — `/usr/lib/udev/rules.d/70-uaccess.rules`
+tags devices the same way, `73-seat-late.rules` line 16 consumes the tag with
+`TAG=="uaccess", ENV{MAJOR}!="", RUN{builtin}+="uaccess"`, and our file sorts
+after both — and that `50-udev-default.rules` line 86 is what sets `GROUP="lp"`
+on a USB printer-class device.
+
+Acceptance test, on the maintainer's machine, after upgrading to alpha-4:
+
+1. `getfacl /dev/bus/usb/<bus>/<dev>` with the printer plugged in and the
+   maintainer logged in locally shows a `user:<name>:rw-` entry.
+2. `ml216x-printer-app devices` lists the printer **without `sudo`**.
+3. `systemctl --user status ml216x-printer-app` is active, and
+   `ps -o user= -C ml216x-printer-app` shows the maintainer, not root.
+4. A real page prints through the IPP queue, and the reconnect / power-cycle
+   check above still passes.
+
+If step 1 fails over SSH rather than at the console, that is expected — there
+is no active local session for the ACL — and the README's group `lp` fallback
+is the answer for a headless machine.

@@ -16,7 +16,8 @@ temporary directory, so nothing touched the developer's own state.
 |---|---|---|---|---|
 | S-1 | libpappl `job-process.c` | out-of-bounds write while dithering 8-bit input | yes, over IPP | no |
 | S-2 | libpappl `printer-ipp.c` | stack overflow on oversized `media-ready` | yes, over IPP | no |
-| S-3 | our systemd unit | the service runs as root | n/a | yes, deferred |
+| S-3 | our systemd unit | the service ran as root | n/a | yes — fixed in 2.0.0~alpha-4 (Q-18) |
+| S-4 | libpappl control socket | mode 0777, any local user may drive the server | not in the shipped configuration | contained in 2.0.0~alpha-4 (Q-19) |
 
 S-1 and S-2 are the two unpatched upstream fixes the Q-1 follow-up flagged
 (`4587888f50` and `44327aaac3`). Both are **confirmed present in 1.3.1** and
@@ -117,18 +118,66 @@ necessarily the ceiling; a stack overflow with attacker-controlled contents is
 not something to characterise more precisely from a black-box crash, so it is
 treated as the more serious of the two.
 
-## S-3 — the service runs as root, which widens S-1 and S-2
+## S-3 — the service ran as root, which widened S-1 and S-2 (FIXED in 2.0.0~alpha-4)
 
-`packaging/systemd/ml216x-printer-app.service` runs the daemon as `root`, for
-the reasons written in the unit: a root PAPPL server keeps its state in
-`/var/lib`, its control socket in `/run`, and a `usb://` device is a node under
-`/dev/bus/usb`. The cost is that a local client crashing the service through
-S-1 or S-2 is crashing a root process. A dedicated system user plus a udev rule
-granting it the printer device is the right shape and is deferred to hardware
-bring-up (P12), because the udev rule needs the printer's real USB vendor and
-product IDs, which have not been read off a device. Until then the unit already
-carries `ProtectHome`, `PrivateTmp` and `NoNewPrivileges`, which limit what a
-successful exploit of S-1 could reach, not whether it can crash the process.
+Until 2.0.0~alpha-3, `packaging/systemd/ml216x-printer-app.service` ran the
+daemon as `root`, for the reasons written in that unit: a root PAPPL server
+keeps its state in `/var/lib`, its control socket in `/run`, and a `usb://`
+device is a node under `/dev/bus/usb`. The cost was that a local client
+crashing the service through S-1 or S-2 crashed a root process, and that S-1's
+heap overflow ran with root's authority.
+
+**Fixed by decision Q-18.** The package now installs a systemd *user* unit and
+enables it per user; the server runs as the logged-in user, its state is in
+that user's `$XDG_CONFIG_HOME`, its spool is a 0700 `RuntimeDirectory` under
+`$XDG_RUNTIME_DIR`, and the USB node is reached through a `uaccess` ACL on the
+one hardware-confirmed device rather than by being root. S-1 and S-2 are
+unchanged as bugs and remain reachable by any local client that can open the
+IPP port, but what they now reach is one unprivileged session's own process
+rather than the machine. The two libpappl faults still need the upstream fix;
+this narrows their consequence, and nothing more.
+
+The retired system unit stays in the tree as the record of what it did. If
+anyone reinstates it by hand, S-3 comes back with it.
+
+## S-4 — the control socket is connectable by any local user (CONTAINED in 2.0.0~alpha-4)
+
+Measured, not inferred. Run as uid 1000 with `TMPDIR` unset:
+
+```
+I [...] Listening for connections on '/tmp/ml216x-printer-app1000.sock'.
+srwxrwxrwx 1 dev dev 0 Eyl  6 22:42 /tmp/ml216x-printer-app1000.sock
+```
+
+Mode 0777 on an `AF_UNIX` socket means any local user may connect, and the
+subcommands reached through it — `add`, `modify`, `delete`, `default`,
+`submit`, `shutdown` — are the server's whole control surface, with no
+authentication of their own. libpappl chooses the path: `%s/%s%d.sock` under
+`$TMPDIR` or `/tmp` with the caller's uid for a non-root server, `/run/%s.sock`
+for a root one; both format strings are present in `libpappl.so.1`.
+
+This predates the user-service move and was worse under it: the same 0777
+socket in `/run` let any local account drive a **root** server.
+
+**Contained, by decision Q-19.** The socket's mode is libpappl's and is
+unchanged — it is still 0777 — but the directory holding it is no longer
+`/tmp`. `crates/ml216x-printer-app/src/runtime.rs` points `TMPDIR` at
+`$XDG_RUNTIME_DIR` when the caller has not set one, and only when that
+directory has nothing set for group or other; the socket then sits inside a
+per-user 0700 directory that no other account can traverse. Server and client
+are the same binary and make the same decision, so no documented command
+changed. Verified by running it: with `TMPDIR` unset the server binds
+`/run/user/1000/ml216x-printer-app1000.sock`, `/tmp` gets nothing, and a
+`status` from a shell with no `TMPDIR` still answers.
+
+Two things this does not do, and they are the reason the row says *contained*
+rather than *fixed*. It does not change the socket's permissions, so anything
+that puts it back in a shared directory — an explicit `TMPDIR=/tmp`, a
+`$XDG_RUNTIME_DIR` that is not private, a root server, which uses `/run` and
+ignores `TMPDIR` entirely — is exposed exactly as before, and the first two
+print a warning saying so. And it is a local workaround for a libpappl default
+that would be better fixed upstream, which is candidate (d) in Q-19 and is not
+this project's to schedule.
 
 ## Actions
 
@@ -149,6 +198,11 @@ Tracking the Q-1 follow-up's four agreed actions:
    against `src:pappl` citing `4587888f50` and `44327aaac3` and the confirmed
    1.3.1 lines above, and add the bug number to this document and the README.
    This needs a bug-tracker submission and is left for the maintainer.
+5. ~~**Decide S-4.**~~ **Done.** Q-19 was decided by delegation and
+   implemented in 2.0.0~alpha-4; see S-4 above for what it does and does not
+   cover. What is left is the upstream half — a libpappl that creates its
+   control socket 0600, or places it under `$XDG_RUNTIME_DIR` itself — which
+   belongs in the same conversation as the S-1/S-2 bug report.
 
 ## Reproductions
 

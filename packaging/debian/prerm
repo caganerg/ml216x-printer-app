@@ -2,15 +2,22 @@
 # SPDX-License-Identifier: GPL-2.0-only
 set -e
 
+UNIT=ml216x-printer-app.service
+
 case "$1" in
 remove | deconfigure)
+    # `--global disable` has to run here rather than in postrm: it reads the
+    # [Install] section of the unit file, and by postrm time dpkg has removed
+    # it. A user service that is already running in an open session is not
+    # stopped by this and cannot be from root; the removal notes in the README
+    # say to run `systemctl --user stop ml216x-printer-app` in that session.
     if [ -d /run/systemd/system ]; then
-        systemctl stop ml216x-printer-app.service || true
+        systemctl --global disable "$UNIT" || true
     fi
     ;;
 
-# Not on upgrade: postinst restarts the service, so stopping it here would only
-# widen the window in which no server is listening.
+# Not on upgrade: postinst re-enables the unit, and an upgrade should not
+# disturb a session that is already serving.
 upgrade | failed-upgrade) ;;
 
 *)

@@ -8,19 +8,20 @@ remove)
         udevadm control --reload-rules || true
     fi
     if [ -d /run/systemd/system ]; then
-        systemctl disable ml216x-printer-app.service || true
         systemctl daemon-reload || true
     fi
     ;;
 
 purge)
     if [ -d /run/systemd/system ]; then
-        systemctl disable ml216x-printer-app.service || true
         systemctl daemon-reload || true
     fi
-    # Only on purge, and only what this package created: the printers the
-    # administrator added live in the state file, and removing the package is
-    # not a statement that they are unwanted.
+    # The only state this package can still own is what the root service of
+    # 2.0.0~alpha-3 and earlier left behind. A user service keeps its printers
+    # in each user's own $XDG_CONFIG_HOME/ml216x-printer-app.state and its
+    # spool in that user's runtime directory; purging a package is not licence
+    # to delete files out of people's home directories, so neither is touched.
+    # The README says how to remove them.
     rm -f /var/lib/ml216x-printer-app.state
     rm -rf /var/spool/ml216x-printer-app
     ;;
