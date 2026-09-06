@@ -118,10 +118,17 @@ stream, a single flipped bit, and the old resolution order.
 
 ## Next work — the rest of P7
 
-1. **USB**, as far as it goes without hardware: a `devices` listing check,
-   `papplDeviceIsSupported` on a `usb://` URI, and the permission story written
-   down — access to `/dev/bus/usb` is a packaging matter, not a code one.
-   Socket transport is proven; USB has still never been opened.
+1. **USB.** Everything that can be established without a printer has been:
+   `ml216x-printer-app devices` runs and lists nothing on this machine, which
+   agrees with `docs/GOLDEN-VALIDATION.md` §4 — no Samsung device is attached,
+   and `/dev/bus/usb` holds no node this user could open anyway. What is left
+   genuinely needs hardware: opening a `usb://` URI, and the IEEE-1284 device
+   ID the printer reports. **The udev rule cannot be written yet**, because a
+   rule needs the real vendor and product IDs and the only ones available now
+   would be recalled rather than read off a device; the PPD records
+   `MFG:Samsung;MDL:ML-2160 Series;CMD:SPL,FWV,EXT;` and says nothing about
+   USB IDs. Take them from `lsusb` at bring-up (P12) and write the rule then.
+   Socket transport, by contrast, is proven end to end.
 2. **Packaging for the printer application**: `packaging/debian/control` still
    describes the 1.x filter, and there is no service unit, no user, and no udev
    rule for the USB case.
@@ -134,9 +141,11 @@ stream, a single flipped bit, and the old resolution order.
 
 Two smaller items found alongside, neither blocking:
 
-* `spl2-core` still emits Turkish diagnostics, and they now surface in PAPPL's
-  job log ("Hesaplanan bant genişliği (1240 B) ..."). Q-11's known-deviation
-  list named only `src/golden.rs` and `goldens/README.md`; it is wider.
+* ~~`spl2-core` still emits Turkish diagnostics~~ — **done.** Every diagnostic
+  string in `spl2-core` is English, and the goldens are byte identical across
+  the change. The Turkish **comments** in `src/main.rs`, `src/golden.rs`, the
+  four `spl2-core` modules and `goldens/README.md` remain, and are left to a
+  dedicated pass.
 * PAPPL 1.3.1's own log lines drop the last character of formatted numbers —
   "Device write metrics: 4545 bytes" for 45453 bytes actually written,
   "60x60dpi" for `600x600dpi` as stored in the state file, "3276 clients" for
@@ -149,8 +158,11 @@ Hardware G-1 and open questions Q-12 and Q-13 remain outstanding; Q-14 to Q-17
 are decided and implemented. No hardware print was performed.
 
 Checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
-`cargo fmt --all --check`, golden checksums, and all three `p5-probe.py` modes
-(default, `--spl`, `--device-failure`).
+`cargo fmt --all --check`, golden checksums, all three `p5-probe.py` modes
+(default, `--spl`, `--device-failure`), and `transport-probe.py` both plain and
+with `--inject truncate` / `--inject flip`. Every script scopes
+`XDG_CONFIG_HOME` to a temporary directory; run them no other way, or a probe
+run leaves printers in the user's own PAPPL state.
 
 ## Step numbering
 
