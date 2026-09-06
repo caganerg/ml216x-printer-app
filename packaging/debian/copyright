@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: samsung-ml2160-rust
-Source: https://github.com/caganerg/samsung-ml2160-rust
+Upstream-Name: ml216x-printer-app
+Source: https://github.com/caganerg/ml216x-printer-app
 
 Files: *
 Copyright: 2025-2026 Çağan ERGÜN <73942784+caganerg@users.noreply.github.com>

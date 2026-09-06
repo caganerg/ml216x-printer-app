@@ -82,20 +82,24 @@ updates and make this project the response path for libpappl's CVEs.
 script checks that `libpappl-dev` is present and inside the `>= 1.3, < 2.0`
 range before it builds anything, so a wrong library version fails with a
 sentence rather than with a link error, and it writes
-`dist/samsung-ml2160-rust_<version>_<arch>.deb`. The metadata it packs comes
+`dist/ml216x-printer-app_<version>_<arch>.deb`. The metadata it packs comes
 from `packaging/debian/`: `control`, `copyright`, `changelog` and the three
 maintainer scripts.
 
 ### Install it
 
 ```sh
-sudo apt install ./dist/samsung-ml2160-rust_2.0.0~alpha-4_amd64.deb
+sudo apt install ./dist/ml216x-printer-app_2.0.0~alpha-5_amd64.deb
 systemctl --user start ml216x-printer-app     # or just log out and back in
 systemctl --user status ml216x-printer-app
 ```
 
 Use `apt install ./…` rather than `dpkg -i`, so the library dependencies are
-resolved. Note the `--user` in every `systemctl` line: installing runs
+resolved. The package was called `samsung-ml2160-rust` up to 2.0.0~alpha-4;
+both install the same binary and cannot be co-installed, so apt removes the old
+one as part of this — which is also what stops and disables the root service it
+used to run. Printers you had added are untouched: they live in
+`~/.config/ml216x-printer-app.state`. Note the `--user` in every `systemctl` line: installing runs
 `systemctl --global enable`, which enables the service in every user's own
 service manager, so it starts by itself at the next login. It cannot be
 started from the package into a session that is already open, which is what
@@ -162,8 +166,8 @@ permissions are the thing to check; see
 
 ```sh
 systemctl --user stop ml216x-printer-app   # in each session that runs it
-sudo apt remove samsung-ml2160-rust        # disables it for future logins
-sudo apt purge samsung-ml2160-rust         # also drops the old root service's state
+sudo apt remove ml216x-printer-app         # disables it for future logins
+sudo apt purge ml216x-printer-app          # also drops the old root service's state
 ```
 
 Stop it yourself first: removal runs `systemctl --global disable`, which stops

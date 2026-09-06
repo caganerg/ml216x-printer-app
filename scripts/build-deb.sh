@@ -36,8 +36,15 @@ PAPPL_VERSION=$(pkg-config --modversion pappl)
 pkg-config --atleast-version=1.3 pappl || die "libpappl $PAPPL_VERSION is older than 1.3"
 pkg-config --max-version=1.999 pappl || die "libpappl $PAPPL_VERSION is 2.x; decision Q-1 targets 1.3"
 
+# Read from control rather than repeated here: the package was renamed once
+# already (samsung-ml2160-rust -> ml216x-printer-app in 2.0.0~alpha-5) and a
+# second copy of the name is a second thing to forget. Note that dpkg-deb
+# rejects `#` comment lines in a binary control file, so the reasoning that
+# would otherwise live next to those fields is in the changelog instead.
+PACKAGE=$(sed -n 's/^Package: //p' packaging/debian/control)
 VERSION=$(sed -n 's/^Version: //p' packaging/debian/control)
 ARCH=$(sed -n 's/^Architecture: //p' packaging/debian/control)
+[ -n "$PACKAGE" ] || die "no Package: field in packaging/debian/control"
 [ -n "$VERSION" ] || die "no Version: field in packaging/debian/control"
 [ "$ARCH" = "$(dpkg --print-architecture)" ] ||
     die "packaging/debian/control says $ARCH, this machine is $(dpkg --print-architecture)"
@@ -49,7 +56,7 @@ STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 # mktemp gives 0700; the package's own root directory must not carry that.
 chmod 755 "$STAGE"
-DOC=usr/share/doc/samsung-ml2160-rust
+DOC=usr/share/doc/$PACKAGE
 
 install -D -m 755 "$BINARY" "$STAGE/usr/bin/ml216x-printer-app"
 # /usr/lib/systemd/user, not .../system: the application runs as a user
@@ -80,7 +87,7 @@ chmod 644 "$STAGE/DEBIAN/control" "$STAGE/DEBIAN/md5sums"
 # --root-owner-group is what makes the installed files root-owned whoever
 # built the package; the 1.x recipe spelled the same thing out with tar flags.
 mkdir -p dist
-OUTPUT="dist/samsung-ml2160-rust_${VERSION}_${ARCH}.deb"
+OUTPUT="dist/${PACKAGE}_${VERSION}_${ARCH}.deb"
 dpkg-deb --build --root-owner-group "$STAGE" "$OUTPUT" >/dev/null
 echo "built $OUTPUT"
 dpkg-deb --info "$OUTPUT" | sed -n '/^ Package:/,/^ Description:/p'

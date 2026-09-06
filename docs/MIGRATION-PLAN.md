@@ -276,7 +276,7 @@ option the user actually picks; the offset column is the byte offset decoded by
 ## 7. Proposed target workspace layout
 
 ```
-samsung-ml2160-rust/            # virtual workspace root
+ml216x-printer-app/             # virtual workspace root
 ├── Cargo.toml                  # [workspace] members = [...]
 ├── crates/
 │   ├── spl2-core/              # GPL-2.0-only  — no C, no I/O, no deps

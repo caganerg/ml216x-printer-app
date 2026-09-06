@@ -25,6 +25,25 @@ The packaging change itself is **not yet installed or tested on a machine**;
 `sh -n`, a package build, and running the binary by hand are all that has been
 done.
 
+**The Debian package is now `ml216x-printer-app` (2.0.0~alpha-5)**, renamed
+with the repository, which moved to `github.com/caganerg/ml216x-printer-app`.
+Only packaging metadata changed: the package name, its documentation directory,
+the homepage and the `Documentation=` URLs. It declares
+Conflicts/Replaces/Provides on `samsung-ml2160-rust` because both install
+`/usr/bin/ml216x-printer-app`, so apt removes the old package — which is also
+what stops and disables the root service of alpha-3 and earlier. `postinst`
+keeps a backstop for a *dangling* enablement symlink, and only a dangling one:
+a system unit someone installed by hand resolves to a real file and is left
+alone. The five branches of that condition were exercised in a scratch
+directory. The Rust crate names are untouched: the root crate is still
+`samsung-2160-rust` (the legacy filter) and `ml216x-printer-app` was already
+taken by the application crate.
+
+One thing dpkg settled by rejecting it: `#` comment lines are not allowed in a
+binary package's control file (`dpkg-deb: error: parsing file … near line 12:
+field name '#' must be followed by colon`). Reasoning that would sit next to
+those fields lives in the changelog and in `scripts/build-deb.sh` instead.
+
 **P6 is implemented: `spl2-core` is extracted and the SPL2 callbacks are
 connected.** The printer application now emits real SPL2/QPDL through PAPPL.
 The maintainer reports successful hardware printing and CUPS network sharing,

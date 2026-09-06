@@ -1,6 +1,6 @@
 [Unit]
 Description=Samsung ML-216x Printer Application
-Documentation=https://github.com/caganerg/samsung-ml2160-rust
+Documentation=https://github.com/caganerg/ml216x-printer-app
 # There is no ordering against avahi-daemon.service here, and there cannot be:
 # that is a system unit and a user manager cannot order against one. Avahi only
 # publishes the queue over DNS-SD; without it the application still serves IPP

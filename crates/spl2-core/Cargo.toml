@@ -6,7 +6,7 @@ version = "2.0.0-alpha"
 edition = "2021"
 license = "GPL-2.0-only"
 description = "SPL2/QPDL v3 protocol engine for Samsung ML-216x printers"
-repository = "https://github.com/caganerg/samsung-ml2160-rust"
+repository = "https://github.com/caganerg/ml216x-printer-app"
 
 [features]
 # Q-6: the classic CUPS Raster parser is kept behind a non-default feature

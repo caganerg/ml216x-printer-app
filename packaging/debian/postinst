@@ -6,18 +6,27 @@ UNIT=ml216x-printer-app.service
 
 case "$1" in
 configure)
-    # Up to and including 2.0.0~alpha-3 this package installed a system unit
-    # that ran the application as root. That unit is gone from the package, but
-    # dpkg does not stop a running service or remove the enablement symlink an
-    # earlier postinst created, and the root server would go on holding port
-    # 8631 against the user service that replaces it. Stop it while it is still
-    # loaded, then drop what enabled it.
-    if [ -n "$2" ] && dpkg --compare-versions "$2" lt "2.0.0~alpha-4"; then
+    # Up to and including 2.0.0~alpha-3 — under the old package name
+    # samsung-ml2160-rust — this installed a system unit that ran the
+    # application as root. A root server holding port 8631 would keep the user
+    # service from ever binding, so it has to be gone before this one starts.
+    #
+    # Two paths lead here and both are covered. An upgrade under this package
+    # name is caught by the version test. The rename is not: $2 is empty on the
+    # first install of ml216x-printer-app, and the transition is handled instead
+    # by apt removing the conflicting old package, whose own prerm and postrm
+    # stop and disable that service. What is left after either path is a
+    # *dangling* enablement symlink, whose unit file is gone — that is
+    # unambiguously the old package's leftover, and never a system unit someone
+    # installed by hand, which resolves to a real file and is left alone.
+    WANTS="/etc/systemd/system/multi-user.target.wants/$UNIT"
+    if { [ -n "$2" ] && dpkg --compare-versions "$2" lt "2.0.0~alpha-4"; } ||
+        { [ -L "$WANTS" ] && [ ! -e "$WANTS" ]; }; then
         if [ -d /run/systemd/system ]; then
             systemctl stop "$UNIT" || true
             systemctl disable "$UNIT" || true
         fi
-        rm -f "/etc/systemd/system/multi-user.target.wants/$UNIT"
+        rm -f "$WANTS"
     fi
 
     # Apply to future hotplug events; never replay events for attached devices.

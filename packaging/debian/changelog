@@ -1,3 +1,22 @@
+ml216x-printer-app (2.0.0~alpha-5) unstable; urgency=medium
+
+  * Renamed from samsung-ml2160-rust, following the repository rename. The
+    binary, the unit, the udev rule and every path they use are unchanged; what
+    moves is the package name, its documentation directory
+    (/usr/share/doc/ml216x-printer-app) and the homepage.
+  * Declares Conflicts/Replaces/Provides on samsung-ml2160-rust, since both
+    install /usr/bin/ml216x-printer-app and cannot be co-installed. Installing
+    this package therefore removes the old one, and that removal is what stops
+    and disables the root system service of 2.0.0~alpha-3 and earlier. postinst
+    keeps a backstop for the case where a dangling enablement symlink survives
+    anyway: a root server holding port 8631 would keep the user service from
+    ever binding.
+  * Note for anyone who installed the old package: apt handles the transition,
+    but its per-user state is not touched by any of this. Printers you added
+    live in ~/.config/ml216x-printer-app.state and stay there.
+
+ -- Çağan ERGÜN <caganergun@tutanota.com>  Sun, 06 Sep 2026 23:30:00 +0300
+
 samsung-ml2160-rust (2.0.0~alpha-4) unstable; urgency=medium
 
   * The application now runs entirely in user space (decision Q-18). The

@@ -10,7 +10,7 @@
 #
 [Unit]
 Description=Samsung ML-216x Printer Application
-Documentation=https://github.com/caganerg/samsung-ml2160-rust
+Documentation=https://github.com/caganerg/ml216x-printer-app
 # Avahi is what publishes the printer over DNS-SD. It is a Recommends, not a
 # Depends: without it the application still serves IPP on the loopback address,
 # it simply is not advertised.
