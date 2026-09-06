@@ -177,11 +177,16 @@ stream, a single flipped bit, and the old resolution order.
    agrees with `docs/GOLDEN-VALIDATION.md` §4 — no Samsung device is attached,
    and `/dev/bus/usb` holds no node this user could open anyway. What is left
    needs hardware: diagnosing duplicate desktop queue creation, recording the
-   successful setup, and collecting the IEEE-1284 device ID. **The udev rule cannot be written yet**, because a
-   rule needs the real vendor and product IDs and the only ones available now
-   would be recalled rather than read off a device; the PPD records
-   `MFG:Samsung;MDL:ML-2160 Series;CMD:SPL,FWV,EXT;` and says nothing about
-   USB IDs. Take them from `lsusb` at bring-up (P12) and write the rule then.
+   successful setup, and collecting the IEEE-1284 device ID.
+
+   **Corrected 2026-09-06:** this item used to say the udev rules could not be
+   written because no real vendor and product IDs were available. They are
+   available — the maintainer supplied `04e8:330f` — and two device-scoped
+   rules now ship against it: the duplicate-queue suppression of alpha-3 and
+   the `uaccess` tag of alpha-4. What is still missing is not the IDs but the
+   acceptance run on the maintainer's machine, and the IEEE-1284 device ID,
+   which the PPD does not carry either (it records
+   `MFG:Samsung;MDL:ML-2160 Series;CMD:SPL,FWV,EXT;` and nothing about USB).
    Socket transport, by contrast, is proven end to end.
 2. ~~**Packaging for the printer application**~~ — **done**, and the USB
    permission story is now answered rather than pending: the maintainer
@@ -208,17 +213,43 @@ stream, a single flipped bit, and the old resolution order.
    `docs/DECISIONS.md`, and `scripts/security-probe.py`. The one action left is
    filing the Debian bug, which needs a bug-tracker submission (maintainer).
 
-The diagnostic and commentary translation pass landed in `d3f6677`.
+The diagnostic and commentary translation pass landed in `d3f6677`, and the
+comment pass that finished it — the whole test module of `src/main.rs` — landed
+after it; Q-11's known deviation is closed, with the three deliberate Turkish
+fragments listed in that decision entry.
 The default build now selects the Printer Application; the legacy filter is
 an explicitly selected reference package. README installation and option
 examples use the IPP application. Q-12's stale margin gate and sidecar metadata
 are corrected without changing SPL output.
 
-An earlier note here claimed PAPPL's log lines drop the last character of
-formatted numbers ("4545" for 45453, "60x60dpi" for 600x600). That was wrong:
-the 1.3.1 format strings are correct (`%lu bytes`, `%dx%ddpi`), the QPDL width
-computed from the resolution was right, and the truncation was an artifact of
-how the output was captured, not a libpappl defect. Nothing to report.
+**The log-truncation question, settled by measurement on 2026-09-06.** This
+paragraph has now said both things, so here is the evidence rather than a third
+opinion. An early note claimed PAPPL's log lines drop the last character of
+formatted numbers; a later correction said that was a capture artifact and the
+format strings were fine. Both halves were half right.
+
+The format strings *are* correct. `libpappl.so.1` contains, verbatim:
+
+```
+Starting log, system up %ld second(s), %d printer(s), listening for connections on '%s:%d' from up to %d clients.
+```
+
+What comes out of it does not match. The server was started three times, at
+`--listen-port 8639`, `18631` and `12345`, and logged `debian.local:863`,
+`debian.local:1863` and `debian.local:1234`; the constant client limit printed
+as `3276` (32767) every time, and the two zero-valued counts printed as nothing
+at all — `system up  second(s),  printer(s)`. Every numeric conversion loses
+its last character. String conversions do not: the hostname above is intact,
+and so is the full socket path in `Listening for connections on '%s'`.
+
+The bind itself is correct, which is the part that matters here: with the log
+saying `1863`, `ss -ltnp` showed the process listening on `127.0.0.1:18631`.
+So this is a display defect in libpappl's own log writer — it costs nothing but
+the readability of a diagnostic, and the mechanism was not located from
+outside the library. **Never read a number out of a PAPPL log line without
+confirming it another way**; that is how the "the resolution is wrong" scare
+started. If the S-1/S-2 report to Debian is filed, this is worth a sentence in
+it, but it is cosmetic and is the maintainer's call whether to include.
 
 Keep the original filter in-tree until P11 passes; keep the PPD permanently.
 Hardware G-1 and open question Q-13 remain outstanding; Q-12 and Q-14 to Q-17
