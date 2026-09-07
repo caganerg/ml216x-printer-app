@@ -172,6 +172,20 @@ in every status report, and `docs/MARGINS.md` (the P5 printable-area
 experiment) does not close it — that experiment establishes what PAPPL
 delivers, not where the toner lands.
 
+**The procedure for taking the measurement is
+[`docs/G1-MEASUREMENT.md`](G1-MEASUREMENT.md)**, added 2026-09-07: a
+ruler-bearing page a millimetre rule can actually read, a harness that proves
+the page survives the driver unchanged on all 11 media and 4 resolutions, and
+the record form to fill in per model. The single-pixel corner marks of the
+`*-marks` corpus cases are not what to print for this; at 600 dpi they are
+42 µm across.
+
+The gate text above is left exactly as written, including "through the 1.x
+path". The runbook measures the *shipping* path instead, because that is what
+the package installs, and whether the gate's wording should follow is open
+question **Q-20** in `docs/DECISIONS.md` rather than something the runbook
+decided.
+
 
 ## 2026-09-06 — authorized 12.5 pt refresh
 

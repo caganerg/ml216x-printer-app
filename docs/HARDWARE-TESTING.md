@@ -1,5 +1,10 @@
 # Hardware testing and reconnect investigation
 
+**The acceptance checks below are gathered, with the G-1 margin measurement
+they share a session with, in [`docs/G1-MEASUREMENT.md`](G1-MEASUREMENT.md).**
+This file keeps the investigation and the evidence; that one is the procedure
+to work through at the printer.
+
 ## Maintainer report, 2026-09-06
 
 After installing the Debian package on their own system, the maintainer

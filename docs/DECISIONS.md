@@ -14,9 +14,112 @@ answered. **Q-7 exists and is decided:** it asked whether the .deb should link
 libpappl statically or dynamically, and it is answered under Q-7 below (and
 folded into Q-1, which settled the same matter). Counting the decided entries
 as ten and treating Q-7 as unaccounted for is the arithmetic slip this note
-exists to prevent. **Q-12 through Q-19** were added later, by review and by
+exists to prevent. **Q-12 through Q-21** were added later, by review and by
 implementation rather than by the migration plan, and are the only entries
 outside the Q-1..Q-11 range.
+
+---
+
+## 2026-09-07 — Q-21 (OPEN): the horizontal margin rounds up to a byte, and moves the sheet 0.33 mm
+
+Raised while building the G-1 measurement page (P12). Like Q-13 it is written
+up rather than acted on, because it is a decision about what lands on paper.
+
+**What the code does, and it is not in doubt.** `hard_margin_bytes`
+(`crates/spl2-core/src/geometry.rs`) converts the 12.5 pt margin to pixels,
+rounds **up to a whole 8-pixel byte column**, and returns the byte count. At
+600 dpi 12.5 pt is 104.17 px, which becomes 112 px, or 4.74 mm. The engine's
+first printable dot is at the physical hard margin, 4.41 mm. `band_placement`
+maps raster column 112 to band column 0, so **sheet content is placed 0.33 mm
+further left than its nominal sheet position** at 600 dpi; the figure varies
+with the resolution, worst at 300 dpi where the byte column is 8/300 inch.
+
+The quoted SpliX source is unambiguous that the rounding belongs there —
+`hardMarginX = ((unsigned long)ceil(...) + 7) & ~7` — and the band buffer is
+byte addressed, so a fractional byte column has nowhere to live. What SpliX
+does not say is whether the *content* was meant to move with it.
+
+**Why nothing in the tree can see this.** The 1.x filter applies the same
+rounded value, and the P6 test
+`full_media_and_printable_area_place_the_sheet_identically` asserts only that
+the two front ends agree with each other. They do. Whether they agree with the
+sheet is a different question, and the 32 goldens cannot answer it either:
+every one of them derives its margin from this same function, so the shift is
+in the frozen bytes as much as in the live code.
+
+**Candidate resolutions.**
+
+- **(a) Keep the rounding and the shift (implemented today).** It is what
+  SpliX does and what 1.x shipped, so 2.0 prints where 1.x printed. 0.33 mm at
+  600 dpi is below what a millimetre rule resolves and well inside the
+  registration tolerance of a 20 ppm laser engine.
+- **(b) Keep the byte-aligned band offset but shift the content back**, by
+  padding the band's leading partial byte and starting the copy at the
+  fractional pixel. This costs a per-line bit shift of the whole raster — the
+  hot loop of every page — and it changes every golden byte for byte.
+- **(c) Round to the nearest byte column rather than up.** At 600 dpi 104.17
+  px rounds to 104 and then to 13 byte columns, landing 0.17 mm *right* of
+  nominal instead of 0.33 mm left. Cheaper than (b), still changes every
+  golden, and it makes the two axes' rules match (`hard_margin_lines` already
+  rounds to nearest).
+
+**Expectation: (a)**, on the ground that 1.x printed this way on real hardware
+for as long as the driver has existed, and that changing placement is a change
+G-1 would then have to be re-measured against. The reason to record it anyway
+is that (a) is a *choice*, not an accident, and the next person to read
+`hard_margin_bytes` next to `hard_margin_lines` will notice the two axes round
+differently and be tempted to "fix" one of them.
+
+**What G-1 does about it.** The measurement page places its rulers in
+predicted physical coordinates, which already assume band column 0 sits at
+4.41 mm — so the sheet reads the prediction directly, and a 0.33 mm systematic
+error on the horizontal rulers is the signature of this rounding rather than of
+a wrong margin constant. See `docs/G1-MEASUREMENT.md` section 2.
+
+---
+
+## 2026-09-07 — Q-20 (OPEN): G-1 asks for the 1.x path, but the shipping path is the printer application
+
+Raised while writing the P12 runbook. The gate's own text is the thing in
+question, so it is not something to reinterpret quietly.
+
+**What G-1 says.** `docs/GOLDEN-VALIDATION.md` section 4: "2.0 does not ship
+until a registration-mark golden has been printed **through the 1.x path** and
+its margins measured against `ppd/samsung-ml2160.ppd`'s `*ImageableArea`". It
+was written when the 1.x filter was the only path that existed and the golden
+corpus was the only thing that could produce a page.
+
+**What has changed since.** The 2.0 package ships no filter and no PPD
+(decision Q-5); a printer application is driven over IPP. The margins users
+will meet are the ones `crates/ml216x-printer-app` produces, and its vertical
+rule has no precedent in the 1.x code at all (Q-13). Measuring the 1.x filter
+would therefore clear a gate on a path the package does not install.
+
+**Candidate resolutions.**
+
+- **(a) Restate G-1 against the shipping path.** The gate is satisfied by the
+  measurement page of `docs/G1-MEASUREMENT.md`, printed through the printer
+  application's IPP queue, per model. The 1.x path is not measured at all.
+- **(b) Restate it as (a) and additionally require one 1.x comparison page**
+  per model, so that any disagreement between the two front ends is caught on
+  paper as well as in the P6 test that asserts they agree. This needs a
+  CUPS-Raster version of the measurement page — the 1.x filter takes classic
+  raster, not PWG — which means a new case in the frozen golden harness and a
+  blessing for it.
+- **(c) Leave the wording alone** and measure the 1.x path, treating the
+  printer application's margins as covered by the P6 equivalence test.
+
+**Expectation: (a).** The shipping path is what ships, and (c) inverts the
+gate's purpose: it would let 2.0 out on a measurement of code the package
+deletes. (b) is the thorough answer and I would take it if a disagreement were
+plausible, but the equivalence it would confirm on paper is already asserted
+byte for byte across all 11 media and 4 resolutions, and the vertical axis —
+the one that is genuinely unverified — has no 1.x counterpart to compare
+against, so (b) would spend a golden blessing on the half that is not at risk.
+
+Until this is answered, `docs/G1-MEASUREMENT.md` measures the shipping path and
+says so, and G-1's text in `docs/GOLDEN-VALIDATION.md` is left exactly as
+written.
 
 ---
 

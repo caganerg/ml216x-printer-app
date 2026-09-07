@@ -70,7 +70,10 @@ updates and make this project the response path for libpappl's CVEs.
 > [!NOTE]
 > This is an alpha of the 2.0 line. The hard margins have not been measured on
 > paper yet — release gate G-1 in [`docs/GOLDEN-VALIDATION.md`](docs/GOLDEN-VALIDATION.md)
-> — so treat printed output as unverified until that gate is closed.
+> — so treat printed output as unverified until that gate is closed. The
+> procedure and the record form are ready in
+> [`docs/G1-MEASUREMENT.md`](docs/G1-MEASUREMENT.md); taking the measurement
+> needs a printer, paper and a millimetre rule.
 
 ### Build it
 
@@ -263,11 +266,17 @@ python3 scripts/p5-probe.py --output /tmp/p5-measurements.json
 python3 scripts/p5-probe.py --spl --output /tmp/p5-spl.json
 python3 scripts/p5-probe.py --device-failure --output /tmp/p5-failure.json
 python3 scripts/transport-probe.py
+python3 scripts/g1-probe.py --all
 ```
 
 These use temporary state and local destinations. The P5 probe checks raster
 geometry, SPL page headers and write failure handling; the transport probe
-compares file and socket output and checks print-quality resolution selection.
+compares file and socket output and checks print-quality resolution selection;
+the G-1 probe prints the measurement page of
+[`docs/G1-MEASUREMENT.md`](docs/G1-MEASUREMENT.md) and decodes the QPDL back
+into a bitmap to confirm every ruler tick landed on the predicted pixel, on
+all 11 media and 4 resolutions. Each one can be made to fail on demand
+(`--inject`); a harness that has never gone red is not evidence.
 They do not replace a hardware print. See [margin measurements](docs/MARGINS.md)
 and [golden validation](docs/GOLDEN-VALIDATION.md).
 
@@ -291,8 +300,9 @@ and [golden validation](docs/GOLDEN-VALIDATION.md).
   (`packaging/systemd/ml216x-printer-app.service` is the retired root system
   unit, kept as a record and no longer installed); `packaging/udev/` — the
   device-scoped rules
-- `scripts/` — `build-deb.sh` builds the package; `p5-probe.py` and
-  `transport-probe.py` drive the printer application over loopback
+- `scripts/` — `build-deb.sh` builds the package; `p5-probe.py`,
+  `transport-probe.py`, `security-probe.py` and `g1-probe.py` drive the printer
+  application over loopback, and `g1-page.c` generates the G-1 measurement page
 
 ## License
 

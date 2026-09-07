@@ -15,3 +15,9 @@ repository = "https://github.com/caganerg/ml216x-printer-app"
 golden-replay = []
 
 [dependencies]
+
+# The decoder the G-1 harness reads pages back with. It needs `decompress`,
+# which decision Q-6 keeps behind this feature rather than `#[cfg(test)]`.
+[[example]]
+name = "qpdl-decode"
+required-features = ["golden-replay"]

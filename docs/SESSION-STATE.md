@@ -1,6 +1,6 @@
 # Session State — PAPPL migration
 
-*Updated 2026-09-06.*
+*Updated 2026-09-07.*
 
 **The application now runs entirely in user space (2.0.0~alpha-4,
 decision Q-18).** The package installs a systemd *user* unit, enables it with
@@ -171,6 +171,63 @@ streams to be byte identical, and it checks each print-quality against PAPPL's
 resolution rule. It has been shown to go red three ways — a truncated socket
 stream, a single flipped bit, and the old resolution order.
 
+## P12 so far — the measurement, prepared but not taken
+
+Everything P12 can do without a printer is done, and it is collected in
+[`docs/G1-MEASUREMENT.md`](G1-MEASUREMENT.md): the runbook, the record form
+per model, and what each measured outcome means.
+
+* **`scripts/g1-page.c`** generates the measurement page as full-media PWG
+  Raster: four corner brackets on the predicted printable-area corners, four
+  numbered millimetre rulers (one per paper edge, out to 25 mm), a 100 mm
+  calibration cross, and a caption naming the medium, resolution and margin.
+  Ticks are placed at whole millimetres of *predicted physical distance from
+  the paper edge*, so a rule laid with its zero on the edge reads the error
+  off directly. It replaces `scripts/pwg-probe-input.c` for this purpose;
+  that generator's single-pixel marks were right for P5 and are 42 µm across.
+  The generator also *declares* every position it drew, in JSON, and the
+  harness re-derives none of them.
+* **`crates/spl2-core/examples/qpdl-decode.rs`** reads an SPL2 stream back
+  into page bitmaps using the engine's own `Algo0x11::decompress` — behind
+  `golden-replay`, for the reason Q-6 gives. Checked against
+  `goldens/a4-600-marks.spl`, where it recovers exactly the two right-hand
+  corner marks the corpus documents, the left pair having been dropped.
+* **`scripts/g1-probe.py`** prints the page through the real printer
+  application to a `file://` device, decodes it, and asserts that every tick,
+  bracket and span landed on the pixel the driver's geometry predicts.
+  `--all` sweeps every medium and resolution the application publishes,
+  asking it over a hand-built IPP request rather than a second copy of the
+  capability table. **44 of 44 cases pass** (11 media × 4 resolutions), and
+  the harness has been shown to fail three ways: `--inject shift` (R-1
+  displacement), `--inject crop` (Q-13's vertical rule) and `--inject scale`
+  (R-4). It also asserts the precondition the whole mapping rests on —
+  `band_placement`'s centring term being zero — instead of assuming it.
+
+What is left is physical and cannot be done here: no Samsung device is
+attached, so the sheet has not been printed or measured. **G-1 is still
+open, per model.**
+
+Two things the preparation turned up, both written up as open questions
+rather than acted on:
+
+* **Q-21** — `hard_margin_bytes` rounds the margin up to a whole byte column,
+  so sheet content is placed 0.33 mm left of its nominal position at 600 dpi.
+  The 1.x filter does the same, which is why no golden and no test can see it;
+  the P6 equivalence test asserts the two front ends agree with each other,
+  not with the sheet. Expectation: keep it.
+* **Q-20** — G-1's text asks for a page printed "through the 1.x path", which
+  the 2.0 package no longer installs. The runbook measures the shipping path
+  and says so; the gate's wording is untouched.
+
+One tooling note worth not rediscovering: **`ipptool -t` fails every
+`Get-Printer-Attributes` against this printer**, reporting
+`document-format-supported`'s `application/octet-stream` as having "bad
+characters (RFC 8011 section 5.1.10)". The report is wrong and it is not this
+driver's bug — the server answers `successful-ok`, the value on the wire is 24
+clean bytes, and libcups' own `ippValidateAttributes` accepts the whole
+response, all three checked on 2026-09-07 against CUPS 2.4.10-3+deb13u2.
+`Print-Job` is unaffected, which is why every probe in `scripts/` uses it.
+
 ## Next work — the rest of P7
 
 1. **USB.** Everything that can be established without a printer has been:
@@ -260,8 +317,9 @@ alpha-3; its reconnect/power-cycle hardware acceptance test remains open.
 
 Checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo fmt --all --check`, golden checksums, all three `p5-probe.py` modes
-(default, `--spl`, `--device-failure`), and `transport-probe.py` both plain and
-with `--inject truncate` / `--inject flip`. Every script scopes
+(default, `--spl`, `--device-failure`), `transport-probe.py` both plain and
+with `--inject truncate` / `--inject flip`, and `g1-probe.py --all` plus its
+three injections (`shift`, `crop`, `scale`). Every script scopes
 `XDG_CONFIG_HOME` to a temporary directory; run them no other way, or a probe
 run leaves printers in the user's own PAPPL state.
 
@@ -292,7 +350,8 @@ before the first declaration. Where older documents in this repository say
 P11 or P12, they mean the rows above.
 
 **Reading order for a fresh agent:** this file, then
-[`docs/MARGINS.md`](MARGINS.md) and `docs/DECISIONS.md`, then
+[`docs/MARGINS.md`](MARGINS.md), `docs/DECISIONS.md` and — before touching
+anything about margins — [`docs/G1-MEASUREMENT.md`](G1-MEASUREMENT.md), then
 `docs/GOLDEN-VALIDATION.md` and `CONTRIBUTING.md` for how output is verified
 and what blessing a golden requires, then `docs/MIGRATION-PLAN.md` §7 and §9
 for the target layout and the six corruption risks. The byte-for-byte

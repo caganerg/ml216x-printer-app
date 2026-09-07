@@ -66,7 +66,10 @@ the same PPD value, so byte-for-byte agreement proves internal consistency and
 nothing about where toner lands on paper. Release gate **G-1**
 (`docs/GOLDEN-VALIDATION.md` §4) is the counterweight: 2.0 does not ship until
 a registration-mark page has been printed on real hardware and measured with a
-ruler. Do not treat a green suite as a verified margin.
+ruler. Do not treat a green suite as a verified margin. The procedure is
+`docs/G1-MEASUREMENT.md`; the software half of it, which proves the page
+survives the driver unchanged, is `scripts/g1-probe.py --all` and it is not
+the measurement.
 
 ## Language
 
