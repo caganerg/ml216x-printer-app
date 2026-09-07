@@ -24,10 +24,13 @@
 //!
 //! ## Language note
 //!
-//! Doc comments and diagnostic strings moved from the 1.x filter are Turkish
-//! and are kept verbatim: the filter is frozen (decision Q-5), so rewording a
-//! message it emits would be a behaviour change rather than a translation.
-//! Code written for the split is English, per decision Q-11.
+//! Everything here is English, per decision Q-11. The doc comments and
+//! diagnostics moved from the 1.x filter were Turkish and were translated in
+//! `d3f6677` and the pass that followed it; no diagnostic string's *content*
+//! changed in a way a golden could see, because the goldens pin the SPL2
+//! bytes and not stderr. The one deliberate exception in this crate is the
+//! Turkish-character folding table in [`qpdl`] and its test data, which is
+//! data rather than prose.
 
 #![forbid(unsafe_code)]
 

@@ -18,11 +18,11 @@ pub const PJL_END: &[u8] = b"\t\x1b%-12345X";
 pub const SUBHEADER_SIG_LE: [u8; 4] = [0xEF, 0xCD, 0xAB, 0x09];
 
 /// Algo 0x11 RLE compression constants
-pub const COMPRESS_SAMPLE_RATE: usize = 0x800; // 2048 bayt
+pub const COMPRESS_SAMPLE_RATE: usize = 0x800; // 2048 bytes
 pub const TABLE_PTR_SIZE: usize = 0x40; // 64 pointers/offsets
-pub const MAX_UNCOMPRESSED_BYTES: usize = 0x80; // 128 bayt
+pub const MAX_UNCOMPRESSED_BYTES: usize = 0x80; // 128 bytes
 pub const MIN_COMPRESSED_BYTES: usize = 2; // > 2 bytes (at least a 3-byte match)
-pub const MAX_COMPRESSED_BYTES: usize = 0x1FF + 3; // 514 bayt
+pub const MAX_COMPRESSED_BYTES: usize = 0x1FF + 3; // 514 bytes
 pub const COMPRESSION_FLAG: u8 = 0x80;
 
 /// Samsung QPDL paper-size definitions

@@ -830,7 +830,7 @@ mod tests {
     fn test_v2_decodes_each_record_kind() {
         // [0] no line repeat
         // [2, 0xAB]      -> 0xAB x3
-        // [0xFE, 1, 2, 3] -> (257-254)=3 ham bayt
+        // [0xFE, 1, 2, 3] -> (257-254)=3 raw bytes
         // [128]          -> blank to end of line (K => 0x00)
         let payload = [0x00, 0x02, 0xAB, 0xFE, 0x01, 0x02, 0x03, 0x80];
         let lines = decode_v2(8, 1, &payload);
