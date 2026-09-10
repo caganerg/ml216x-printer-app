@@ -458,6 +458,81 @@ catch.
 
 ---
 
+## 2026-09-10 — Q-23 (DECIDED): the server does not announce itself over DNS-SD
+
+**Decision: the printer application declines DNS-SD, by pointing
+`DBUS_SYSTEM_BUS_ADDRESS` at a path that does not exist before PAPPL starts.**
+Implemented in `crates/ml216x-printer-app/src/runtime.rs` as `deny_dnssd`,
+called from `main` beside `confine` and for the same kind of reason.
+
+**Raised by the maintainer's own installation, not by review.** A second queue
+kept appearing on their desktop, named `ML2160_thinkcentre`. It was diagnosed
+from the network: `avahi-browse` on another machine resolved the service to
+`thinkcentre.local`, address `192.168.122.1`, **port 8631** — this application,
+not CUPS on 631. CUPS creates a *temporary* queue for a printer it discovers,
+named `<printer>_<host>` when the plain name is taken; deleting it does not
+help, because it is re-created from the announcement rather than stored, and it
+never appears in `/etc/cups/printers.conf` (confirmed: the maintainer's grep
+returned 0). Disabling `cups-browsed` did not stop it either, because cupsd
+makes these itself.
+
+**The announcement was never honourable.** Q-18 binds the server to
+`127.0.0.1`. The service it published named a port nothing off that machine can
+open, so every consumer of the announcement got a queue that accepts jobs and
+cannot deliver them. Sharing to other machines is unaffected by this decision
+and always was: that runs through CUPS on port 631, which advertises its own
+queue — the maintainer prints from a second computer exactly that way.
+
+**Four ways to decline were tried and rejected; the reasons are the value of
+this entry.**
+
+1. **`papplPrinterSetDNSSDName(printer, NULL)` from the
+   `PAPPL_EVENT_PRINTER_CREATED` callback — deadlocks.** PAPPL raises the event
+   while holding the printer's own lock, and the setter wants it. Measured: the
+   server stops responding mid-creation and the `add` subcommand times out
+   after 15 s. This was written, tested, and thrown away; it would have broken
+   printer creation on every installation.
+2. **`papplSystemSetDNSSDName(system, NULL)` — ineffective.** Printers register
+   their own services; clearing the system's name leaves them advertised.
+   Measured with the restore path below.
+3. **Setting `printer-dns-sd-name` over IPP — not permitted.** The printer's
+   own `printer-settable-attributes` does not list it.
+4. **The web interface — no such field.** libpappl 1.3.1 carries no form label
+   for it.
+
+There is also no `PAPPL_SOPTIONS_` flag to disable DNS-SD; the option list ends
+at `PAPPL_SOPTIONS_NO_TLS`.
+
+**What made the measurement honest.** The first three attempts to *observe* the
+announcement found nothing, and nearly produced a false "already fine". The
+registration does not happen when a printer is added: it happens when the
+server starts with the printer **already in its state file**, which is what the
+systemd user unit does at every login. Reproduced by adding a printer,
+stopping the server, starting it again, and watching `avahi-browse` — the
+pre-change binary advertises, the changed one does not. A control run against
+the unchanged binary was what turned "no advertisement" from an assumption into
+a result.
+
+**The cost, stated so nobody reports it as a bug.** The service log carries
+`Unable to initialize DNS-SD: Daemon not running` twice at every start. PAPPL
+still attempts the registration and fails, which is the mechanism working. The
+application is no longer discoverable in an "Add Printer" dialog; it never
+usefully was, and `README.md` documents `lpadmin -v ipp://127.0.0.1:8631/...`
+as the way to give CUPS the queue. `avahi-daemon` stays in the package's
+`Recommends`, because CUPS uses it to advertise the queue the maintainer
+shares.
+
+**Nothing else in this application uses the system bus** — USB device access
+goes through libusb and udev — and an explicit `DBUS_SYSTEM_BUS_ADDRESS` is
+left untouched, on the same principle as Q-19's `TMPDIR`.
+
+**Worth taking upstream.** A printer application that binds the loopback
+address has no way to say "do not publish me", and that is a gap in PAPPL
+rather than in this project. A feature request belongs with the S-1/S-2 report
+in `docs/SECURITY-REVIEW.md` that is still owed to Debian.
+
+---
+
 ## 2026-09-06 — Q-15 (DECIDED): the persisted state file carries printers across driver modes
 
 Raised in the same session. PAPPL's mainloop persists the system to

@@ -27,6 +27,59 @@ use std::ffi::OsStr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+/// Where the D-Bus client looks for the system bus, and therefore where
+/// libavahi-client reaches the daemon that would publish this server.
+const SYSTEM_BUS: &str = "DBUS_SYSTEM_BUS_ADDRESS";
+
+/// Stop this server announcing itself on the network (decision Q-23).
+///
+/// PAPPL registers a DNS-SD service for every printer, including one restored
+/// from the state file at startup, and offers no way to decline: there is no
+/// system option for it, `printer-dns-sd-name` is not in
+/// `printer-settable-attributes`, the web interface has no field for it, and
+/// `papplPrinterSetDNSSDName` — the one API that would do it — deadlocks when
+/// called from the `PAPPL_EVENT_PRINTER_CREATED` callback, which PAPPL raises
+/// while holding the printer's own lock. Measured, not assumed: the server
+/// stops responding and the `add` subcommand times out.
+///
+/// So the announcement is prevented a step earlier. Avahi is reached over the
+/// system bus, and pointing the bus address at a path that does not exist
+/// makes `avahi_client_new` fail. PAPPL logs `Unable to initialize DNS-SD:
+/// Daemon not running` twice and carries on: the server starts, printers are
+/// added and restored, and IPP on the loopback address is untouched. Nothing
+/// else here uses the bus — USB device access goes through libusb and udev.
+///
+/// Why decline at all, when a printer application usually wants to be found:
+/// this one binds `127.0.0.1` only (Q-18), so the service it advertises names
+/// a port nothing off this machine can open. What the announcement did produce
+/// was a second queue on the user's own desktop — CUPS creates a temporary
+/// queue for a printer it discovers, named `<printer>_<host>`, which cannot be
+/// deleted for good because it is re-created from the announcement rather than
+/// stored. Sharing to other machines is unaffected: that runs through CUPS on
+/// port 631, which advertises its own queue and is a separate mechanism.
+///
+/// An explicit `DBUS_SYSTEM_BUS_ADDRESS` is left alone, on the same principle
+/// as [`confine`]: a caller who has set it means it.
+pub fn deny_dnssd() {
+    if let Some(address) = bus_address(std::env::var_os(SYSTEM_BUS).as_deref()) {
+        std::env::set_var(SYSTEM_BUS, address);
+    }
+}
+
+/// What to put in `DBUS_SYSTEM_BUS_ADDRESS`, or `None` to leave it alone.
+///
+/// Split from [`deny_dnssd`] for the same reason [`choose`] is split from
+/// [`confine`]: the decision is testable, the process-wide mutation is not.
+fn bus_address(current: Option<&OsStr>) -> Option<&'static str> {
+    if current.is_some_and(|value| !value.is_empty()) {
+        return None;
+    }
+    // The path must not exist and must not be creatable by accident. It is
+    // never opened by this process; it is read by libdbus, which fails to
+    // connect, which is the whole point.
+    Some("unix:path=/nonexistent/ml216x-no-dns-sd")
+}
+
 /// What to do with `TMPDIR` before handing control to PAPPL.
 #[derive(Debug, PartialEq, Eq)]
 pub enum SocketDir {
@@ -127,6 +180,30 @@ mod tests {
                 dir(0o40700)
             ),
             SocketDir::Explicit
+        );
+    }
+
+    /// Q-23: with nothing set, the bus address is pointed at a path that does
+    /// not exist, so libavahi-client cannot reach the daemon and PAPPL's
+    /// registration attempt fails instead of publishing the printer.
+    #[test]
+    fn an_unset_bus_address_is_pointed_at_nothing() {
+        assert_eq!(
+            bus_address(None),
+            Some("unix:path=/nonexistent/ml216x-no-dns-sd")
+        );
+        assert_eq!(
+            bus_address(Some(OsStr::new(""))),
+            Some("unix:path=/nonexistent/ml216x-no-dns-sd")
+        );
+    }
+
+    /// A caller who has set the bus address means it, exactly as with `TMPDIR`.
+    #[test]
+    fn an_explicit_bus_address_is_never_overridden() {
+        assert_eq!(
+            bus_address(Some(OsStr::new("unix:path=/run/dbus/system_bus_socket"))),
+            None
         );
     }
 

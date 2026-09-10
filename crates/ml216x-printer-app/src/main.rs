@@ -17,6 +17,11 @@ fn run() -> Result<i32, Box<dyn std::error::Error>> {
     // its control socket in $TMPDIR at mode 0777, so leaving that at /tmp hands
     // every local account the server's whole control surface.
     runtime::confine();
+    // Also before any thread exists, and for the same kind of reason: Q-23
+    // declines the DNS-SD announcement PAPPL would otherwise make for every
+    // printer, which this loopback-only server cannot honour and which turns
+    // into a second, undeletable queue on the desktop.
+    runtime::deny_dnssd();
     let mut args = Vec::new();
     let mut probe = false;
     let mut probe_output = None;

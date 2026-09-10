@@ -112,8 +112,12 @@ service manager, so it starts by itself at the next login. It cannot be
 started from the package into a session that is already open, which is what
 the explicit `start` above is for.
 
-Once running it listens on the loopback address at port 8631 and advertises
-itself over DNS-SD if `avahi-daemon` is running. Until you add a printer it
+Once running it listens on the loopback address at port 8631. **It does not
+advertise itself over DNS-SD** (decision Q-23): a service announcement naming a
+port nothing off this machine can open is a promise it cannot keep, and it
+produced a second, undeletable queue on the desktop — see "Keep it to one
+queue". `Unable to initialize DNS-SD: Daemon not running`, twice, in the
+service log is that decision working, not a fault. Until you add a printer it
 does nothing else.
 
 Two consequences of running in your session are worth knowing before you rely
@@ -221,8 +225,13 @@ through a different path than the one this project tests.
   lsusb | grep -i samsung        # expected: ID 04e8:330f
   ```
 
-* **Browsing.** `cups-browsed`, if installed and running, creates its own copy
-  of any queue it discovers over DNS-SD — including this one, advertised by
+* **Browsing.** Anything that discovers printers over DNS-SD makes a copy of
+  what it finds. **Since 2.0.0~alpha-6 this application announces nothing**
+  (Q-23), so this source is closed at the root; the rest of this bullet applies
+  to a queue *CUPS* shares, and to versions before that.
+
+  `cups-browsed`, if installed and running, creates its own copy
+  of any queue it discovers over DNS-SD — including one advertised by
   your own machine. The copy names itself: with `ML2160` already taken it
   appends the host name and you get `ML2160_thinkcentre`, or whatever your
   machine is called. A queue named `<your queue>_<your hostname>` is this and
@@ -245,6 +254,15 @@ through a different path than the one this project tests.
   themselves. Without it they are still discoverable; you add them from the
   "Add Printer" dialog rather than finding them already there. Reverse it at any
   time with `sudo systemctl enable --now cups-browsed`.
+
+  CUPS itself makes copies too, and disabling `cups-browsed` does not stop
+  those: cupsd creates a **temporary** queue for a printer it discovers, which
+  is why deleting one does not keep it away — it is re-created from the
+  announcement rather than stored, and never appears in
+  `/etc/cups/printers.conf`. That is the shape this application's own
+  announcement used to take: a queue named `<printer>_<host>`, pointing at port
+  8631 on the machine's network address, which nothing can reach because the
+  server binds the loopback address only.
 
   Keeping the copy is not dangerous, but it buys nothing and it can mislead.
   It may not even work: this server binds the loopback address only, so a copy
