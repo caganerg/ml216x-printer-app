@@ -140,9 +140,30 @@ The service knows how to talk to the printer; it does not know where the
 printer is. That is one command, and the device URI is yours to choose:
 
 ```sh
+systemctl --user start ml216x-printer-app   # if it is not running already
 ml216x-printer-app devices          # what is attached, if anything
 ml216x-printer-app add -d ML2160 -m samsung_ml216x -v "$DEVICE_URI"
 ```
+
+`add` needs a running server; `devices` does not, because it only enumerates
+what is attached. Installing the package enables the service in every user's
+own `systemd --user` manager, so a **new login starts it by itself** — but a
+session that was already open when the package landed has to be told once, as
+above. Root cannot do this for you: a user service belongs to your session, and
+`postinst` runs outside it. That is the trade for a server that never runs as
+root.
+
+If the server is not running, `add` fails with a message that names the wrong
+problem:
+
+```
+ml216x-printer-app: Unable to start server: No such file or directory
+```
+
+That comes from PAPPL trying to start a server for you. It spawns the path it
+was invoked with, so the file it cannot find is this program itself, reached by
+bare name through `PATH` rather than by an absolute path. Start the service and
+run `add` again.
 
 No `sudo`: these subcommands reach the server over a socket in your runtime
 directory — `/run/user/$(id -u)/`, which only you can enter — and both ends are
