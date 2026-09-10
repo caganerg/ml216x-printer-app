@@ -182,9 +182,63 @@ of their own, only raw JetDirect. Device IDs are self-reported; choose the
 intended printer explicitly.
 Set `DEVICE_URI` to that URI before running `add`.
 
-The queue then appears to CUPS and to every other IPP client as
-`ipp://localhost:8631/ipp/print/ML2160`, and CUPS discovers it over DNS-SD
-without a PPD.
+The queue then appears to every IPP client as
+`ipp://localhost:8631/ipp/print/ML2160`, without a PPD.
+
+### Give CUPS a queue for it
+
+CUPS *can* find the queue on its own over DNS-SD, but only when `avahi-daemon`
+is running **and** something is browsing for it — historically `cups-browsed`,
+which Debian 13 no longer installs by default. So do not wait for it to appear:
+name it explicitly, with the printer application running, since CUPS asks the
+printer what it can do at exactly this moment.
+
+```sh
+ml216x-printer-app printers   # the name you gave `add`; also http://localhost:8631/
+sudo lpadmin -p ML2160 -E -v ipp://127.0.0.1:8631/ipp/print/ML2160 -m everywhere
+lpstat -v                     # ML2160 -> ipp://127.0.0.1:8631/ipp/print/ML2160
+```
+
+`-m everywhere` installs no driver: it tells CUPS to ask the printer for its
+own capabilities, which is what this application exists to answer. From here
+`ML2160` is an ordinary printer in every application's print dialog.
+
+### Keep it to one queue
+
+One printer should mean one queue: the IPP one above. Two other things on a
+Debian desktop create queues of their own, and both make copies that print
+through a different path than the one this project tests.
+
+* **Hotplug.** `system-config-printer-udev`'s `70-printers.rules` asks systemd
+  to configure a queue whenever a USB printer is plugged in, which is where a
+  `usb://…` queue — and another one on the next replug — comes from. The
+  package's own udev rule cancels that request, but **only for USB ID
+  `04e8:330f`**, the device this was confirmed against. Check what your printer
+  reports; if the ID differs, the rule does not match it and the queues will
+  keep coming back:
+
+  ```sh
+  lsusb | grep -i samsung        # expected: ID 04e8:330f
+  ```
+
+* **Browsing.** `cups-browsed`, if installed and running, creates its own copy
+  of any queue it discovers over DNS-SD — including this one.
+
+  ```sh
+  systemctl status cups-browsed          # inactive or not-found is fine
+  sudo systemctl disable --now cups-browsed   # only if it keeps making copies
+  ```
+
+Remove the extras and keep the IPP one. Queue names are yours; check the URI
+rather than the name, and delete only those pointing at `usb://…`:
+
+```sh
+lpstat -v
+sudo lpadmin -x ML-2160-Series
+```
+
+Deleting a queue does not touch the printer you added to the application, which
+lives in `~/.config/ml216x-printer-app.state`.
 
 If `devices` lists nothing while the printer is plugged in, the USB node's
 permissions are the thing to check; see
