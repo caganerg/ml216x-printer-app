@@ -379,6 +379,10 @@ quoted into `debian/copyright`.
 | `pappl-sys` | **Apache-2.0** — *not* MIT, *not* dual | Declarations transcribed from Apache-2.0 headers are arguably derivative of them. Matching upstream's licence is the conservative choice and keeps the crate reusable by anyone. |
 | `pappl` | **Apache-2.0 OR MIT** — *proposed, needs your decision* | The safe wrapper is original work and permissive licensing maximises reuse. But its API shape follows PAPPL's, so if you'd rather be conservative, make it plain Apache-2.0 to match `pappl-sys`. |
 
+**Superseded by the decision actually taken:** both crates are `MIT` only.
+They were `Apache-2.0 OR MIT` from 2026-09-05 to 2026-09-10; the table above is
+the proposal, not the outcome. See `docs/DECISIONS.md`, Q-8a.
+
 Making `pappl-sys`/`pappl` permissive is safe in the other direction:
 GPL-2.0-only code may link permissively licensed crates. The exception is only
 needed for the GPL ↔ Apache direction, i.e. for libpappl itself.
@@ -410,8 +414,8 @@ needed for the GPL ↔ Apache direction, i.e. for libpappl itself.
 | 2 | `ppd/samsung-ml2160.ppd` | GPL-2.0-only (implied) | **no header — needs a decision** |
 | 3 | `README.md`, `docs/**`, `packaging/**` | GPL-2.0-only via `Files: *` | present |
 | 4 | `LICENSE` | GPL-2 text, © FSF | present |
-| 5 | `crates/pappl-sys/**` | Apache-2.0 (proposed) | **to add** |
-| 6 | `crates/pappl/**` | Apache-2.0 OR MIT (proposed) | **to add** |
+| 5 | `crates/pappl-sys/**` | MIT (Apache-2.0 was proposed) | present |
+| 6 | `crates/pappl/**` | MIT (Apache-2.0 OR MIT was proposed) | present |
 | 7 | libpappl itself | Apache-2.0 + GPL2/LGPL2 linking exception | **to add — exact text must be read from the installed package (Q-1)** |
 | 8 | Any new Cargo dependency | TBD | one stanza each; keep the count at zero if possible |
 
@@ -665,7 +669,7 @@ the index.
 | Q-5 | Clean break | Approved for what we **ship**, not for what we **delete**. 1.x code frozen in-tree until P11 is green; the PPD stays permanently as project data. Delete list needs separate approval. |
 | Q-6 | Keep `raster.rs`? | **Keep**, behind a non-default Cargo feature `golden-replay` — *not* `#[cfg(test)]`, which is invisible to integration tests in another crate. |
 | Q-7 | Static or dynamic linking | **Dynamic**, against the archive's `libpappl1t64`. Answered together with Q-1; never open. |
-| Q-8a | Licence for the FFI crates | **`Apache-2.0 OR MIT`** for both `pappl-sys` and `pappl`; `spl2-core` and `ml216x-printer-app` stay `GPL-2.0-only`. |
+| Q-8a | Licence for the FFI crates | **`MIT`** for both `pappl-sys` and `pappl` (`Apache-2.0 OR MIT` until 2026-09-10, when the unused Apache arm was dropped); `spl2-core` and `ml216x-printer-app` stay `GPL-2.0-only`. |
 | Q-8b | Missing PPD licence header | **Add a GPL-2 header.** More important now that the PPD is permanent project data. |
 | Q-9 | Golden-file fixtures | **Approved**, with JSON sidecars and a registration-mark corpus case. **Implemented** — see `src/golden.rs` and `goldens/`. |
 | Q-10 | Device transport | **USB first, socket second.** Do not defer socket past 2.0 without asking. |
@@ -678,9 +682,10 @@ Hardware gate G-1 and P9's raster/dithering validation remain open.
 
 Historical question closure: Q-8a — the licence for the FFI crates — was the last open
 question and was decided on 2026-09-05: `pappl-sys` and `pappl` are both
-`Apache-2.0 OR MIT`, while `spl2-core` and `ml216x-printer-app` stay
-`GPL-2.0-only`. The MIT arm is what lets a GPL-2.0-only binary link them
-without inheriting Apache-2.0's "further restrictions" under GPLv2 §6. See
+permissively licensed — `Apache-2.0 OR MIT` then, `MIT` alone since
+2026-09-10 — while `spl2-core` and `ml216x-printer-app` stay `GPL-2.0-only`.
+MIT is what lets a GPL-2.0-only binary link them without inheriting
+Apache-2.0's "further restrictions" under GPLv2 §6. See
 `docs/DECISIONS.md`, Q-8a, for the reasoning and for the actions it leaves
 outstanding until the crates exist.
 

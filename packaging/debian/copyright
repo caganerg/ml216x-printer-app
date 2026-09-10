@@ -72,13 +72,14 @@ Comment: The upstream notice was transcribed from the SpliX 2.0.1 source
 Files: crates/pappl-sys/*
        crates/pappl/*
 Copyright: 2026 Çağan ERGÜN
-License: Apache-2.0 or MIT
- The two FFI crates are dual-licensed under the standard Rust convention so
- that they stay reusable outside this project while remaining linkable into
- the GPL-2.0-only binary: a GPL-2.0-only consumer takes the MIT arm, which
- carries none of the "further restrictions" that GPLv2 section 6 forbids,
- while the Apache-2.0 arm matches upstream PAPPL for anyone reusing the
- bindings elsewhere. See docs/DECISIONS.md, Q-8a.
+License: MIT
+ The two FFI crates are permissively licensed so that they stay reusable
+ outside this project while remaining linkable into the GPL-2.0-only binary:
+ MIT carries none of the "further restrictions" that GPLv2 section 6 forbids,
+ which Apache-2.0's patent-termination and notice clauses would. They were
+ dual-licensed "Apache-2.0 OR MIT" until 2026-09-10; the Apache-2.0 arm was
+ dropped because a consumer could always elect MIT anyway, so it added a
+ second licence text without adding a guarantee. See docs/DECISIONS.md, Q-8a.
 
 License: GPL-2
  This program is free software; you can redistribute it and/or modify it
@@ -92,22 +93,6 @@ License: GPL-2
  .
  On Debian systems, the full text of the GNU General Public License version 2
  can be found in the file `/usr/share/common-licenses/GPL-2'.
-
-License: Apache-2.0
- Licensed under the Apache License, Version 2.0 (the "License"); you may not
- use these files except in compliance with the License. You may obtain a copy
- of the License at
- .
-     https://www.apache.org/licenses/LICENSE-2.0
- .
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
- WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
- License for the specific language governing permissions and limitations
- under the License.
- .
- On Debian systems, the full text of the Apache License version 2.0 can be
- found in the file `/usr/share/common-licenses/Apache-2.0'.
 
 License: MIT
  Permission is hereby granted, free of charge, to any person obtaining a copy

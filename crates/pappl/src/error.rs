@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0 OR MIT
+// SPDX-License-Identifier: MIT
 
 //! The error type crossing the wrapper boundary.
 

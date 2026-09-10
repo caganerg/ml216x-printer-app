@@ -937,6 +937,44 @@ whole package on PAPPL's linking exception, on top of the packaging costs
 listed under Q-1. The 1.x musl static build does not carry over to 2.0.
 
 ### Q-8a — Licence for the `pappl` safe wrapper
+**Decision (2026-09-10, supersedes the 2026-09-05 decision below): both FFI
+crates are licensed `MIT` only.** `pappl-sys` and `pappl` drop the Apache-2.0
+arm; `spl2-core` and `ml216x-printer-app` stay `GPL-2.0-only`, and the
+GPLv2-compatibility argument below is unchanged, because it always rested on
+the MIT arm.
+
+**Why the Apache arm went.** It was never load-bearing. Under an `OR` dual
+licence any recipient may elect MIT, so the Apache-2.0 terms the arm was meant
+to carry forward — the notice requirement and the express patent grant — were
+optional for every consumer from the start. It therefore did not preserve
+Apache's conditions over the material transcribed from PAPPL's headers, which
+was the reason given for keeping it; it only signalled the intent, and this
+paragraph and the `debian/copyright` stanza signal that just as well. What it
+did cost was a second licence text at the repository root, an extra `License:`
+stanza in `debian/copyright`, a two-name column in the README table and a
+longer SPDX string on fourteen files.
+
+**The full `GPL-2.0-only` alternative was reconsidered here and rejected
+again**, for the two reasons already recorded under the superseded decision:
+it would put a GPL-2.0-only notice on declarations transcribed from
+Apache-2.0 headers — the direction that is one-way incompatible — and it would
+end the reuse of the bindings outside this project, which is the only reason
+they are separate crates. Reducing licence count is worth one file, not that.
+
+Nothing about linking changes. The binary links `libpappl` dynamically and
+that rests on PAPPL's own linking exception, which is independent of how our
+crates are licensed (Q-1, Q-7).
+
+Applied 2026-09-10: `LICENSE-APACHE` deleted; `license = "MIT"` and
+`SPDX-License-Identifier: MIT` across both crates (14 files); the
+`debian/copyright` stanza rewritten and its Apache-2.0 licence text removed;
+README licence table and section, and the CONTRIBUTING licensing note,
+updated.
+
+---
+
+**Superseded — the 2026-09-05 decision, kept for the reasoning it records:**
+
 **Decision (2026-09-05): both FFI crates are licensed `Apache-2.0 OR MIT`.**
 `pappl-sys` and `pappl` both carry the standard Rust dual licence;
 `spl2-core` and `ml216x-printer-app` stay `GPL-2.0-only`.

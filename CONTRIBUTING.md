@@ -119,5 +119,5 @@ gate G-1, it is a measurement with a ruler, and it is still open; see
 
 `spl2-core` and `ml216x-printer-app` are `GPL-2.0-only`, because the SPL2/QPDL
 implementation is derived from GPLv2-only SpliX. `pappl-sys` and `pappl` are
-`Apache-2.0 OR MIT`. New files carry the SPDX identifier of the crate they
+`MIT`. New files carry the SPDX identifier of the crate they
 belong to. See `docs/DECISIONS.md` Q-8a.

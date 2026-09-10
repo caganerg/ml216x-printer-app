@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0 OR MIT
+// SPDX-License-Identifier: MIT
 
 //! Mainloop, driver registration and the raster callback boundary.
 //!
@@ -6,7 +6,7 @@
 //! [`RasterDriver`], supplied by the binary: the built-in [`GeometryProbe`]
 //! writes diagnostic JSON Lines, and the ML-216x application supplies an
 //! SPL2 encoder. The split is not cosmetic — decision Q-8a licenses this
-//! crate `Apache-2.0 OR MIT` while the SPL2 engine is `GPL-2.0-only`, so the
+//! crate `MIT` while the SPL2 engine is `GPL-2.0-only`, so the
 //! protocol may not be linked in here. All C entry points use `guard`.
 
 use crate::{guard, Device, Error, Job, Result};

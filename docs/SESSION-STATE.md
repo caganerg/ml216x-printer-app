@@ -66,7 +66,7 @@ Do not ask again for permission to use 12.5 pt.
   the page loop. All 32 goldens are byte identical across the split, and
   `goldens/SHA256SUMS` verifies unchanged.
 - `crates/pappl`: owns the C boundary only. `RasterDriver` is the seam; the
-  crate stays `Apache-2.0 OR MIT` because the GPL engine is linked by the
+  crate stays `MIT` because the GPL engine is linked by the
   binary, not by it (Q-8a). `RasterOptions` is validated at the boundary, so a
   driver cannot read an unchecked field.
 - `crates/ml216x-printer-app`: `Spl2Driver` turns PAPPL raster jobs into QPDL;

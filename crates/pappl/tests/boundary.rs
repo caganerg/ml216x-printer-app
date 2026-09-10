@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0 OR MIT
+// SPDX-License-Identifier: MIT
 
 //! The property this crate exists for, tested through a real `extern "C"`
 //! function pointer of the type PAPPL will store in its driver data.

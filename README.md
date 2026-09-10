@@ -26,8 +26,8 @@ network exposure but does not fix these bugs. See the
 | Crate | Licence | What it is |
 |---|---|---|
 | `spl2-core` | GPL-2.0-only | The SPL2/QPDL v3 engine: PJL envelope, page header, Algo 0x11 bands. No C or dependencies; output uses a caller-supplied writer. Byte-for-byte frozen by `goldens/`. |
-| `pappl-sys` | Apache-2.0 OR MIT | Hand-written FFI to libpappl, with a C layout probe checking every offset. |
-| `pappl` | Apache-2.0 OR MIT | The safe wrapper: RAII handles, the `catch_unwind` callback shim, and the `RasterDriver` seam. |
+| `pappl-sys` | MIT | Hand-written FFI to libpappl, with a C layout probe checking every offset. |
+| `pappl` | MIT | The safe wrapper: RAII handles, the `catch_unwind` callback shim, and the `RasterDriver` seam. |
 | `ml216x-printer-app` | GPL-2.0-only | The printer application: capability table and the SPL2 driver. |
 | `rastertospl-rust` (root) | GPL-2.0-only | Legacy reference front end and golden harness; built explicitly. |
 
@@ -312,4 +312,5 @@ and [golden validation](docs/GOLDEN-VALIDATION.md).
 
 The driver and SPL2/QPDL engine are GPL-2.0-only, derived from OpenPrinting
 SpliX; see [LICENSE](LICENSE). The `pappl-sys` and `pappl` crates are
-[Apache-2.0](LICENSE-APACHE) OR [MIT](LICENSE-MIT).
+[MIT](LICENSE-MIT), which is what keeps them linkable into the GPL-2.0-only
+binary while staying reusable elsewhere.
