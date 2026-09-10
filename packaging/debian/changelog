@@ -1,3 +1,34 @@
+ml216x-printer-app (2.0.0~alpha-6) unstable; urgency=medium
+
+  * The server no longer announces itself over DNS-SD (decision Q-23). It binds
+    127.0.0.1 only, so the service it used to publish named a port nothing off
+    the machine could open — and CUPS turns a discovered printer into a
+    temporary queue named <printer>_<host>, which cannot be deleted for good
+    because it is re-created from the announcement rather than stored. Users of
+    2.0.0~alpha-5 and earlier who saw a second, undeletable queue were seeing
+    this. Delete it once after upgrading and it stays gone.
+  * Expected, and not a fault: the service log now carries "Unable to
+    initialize DNS-SD: Daemon not running" twice at every start. That is how
+    the announcement is declined — libpappl offers no supported way to say no,
+    for reasons docs/DECISIONS.md Q-23 records in full — and the server serves
+    IPP on the loopback address exactly as before.
+  * Sharing to other machines is unaffected. That runs through CUPS on port
+    631, which advertises its own queue; avahi-daemon therefore stays in
+    Recommends. README.md now documents giving CUPS the queue explicitly with
+    lpadmin -m everywhere, rather than waiting for a discovery that needs a
+    browser Debian 13 no longer installs.
+  * debian/copyright: the two FFI crates are MIT rather than Apache-2.0 OR MIT.
+    Under an OR licence a consumer may always elect MIT, so the Apache arm
+    guaranteed nothing while costing a second licence text; the GPL-2.0-only
+    parts are unchanged and still forced by SpliX.
+  * Source-tree only, with no effect on what this package installs: the frozen
+    1.x CUPS filter was deleted at migration gate P11. Its page loop and its 61
+    tests moved into the spl2-core crate, so the golden corpus that pins the
+    printer's bytes outlived it; the 1.x binary remains buildable from the
+    annotated tag v1.x-final.
+
+ -- Çağan ERGÜN <caganergun@tutanota.com>  Thu, 10 Sep 2026 19:40:00 +0300
+
 ml216x-printer-app (2.0.0~alpha-5) unstable; urgency=medium
 
   * Renamed from samsung-ml2160-rust, following the repository rename. The

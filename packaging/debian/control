@@ -1,6 +1,6 @@
 Source: ml216x-printer-app
 Package: ml216x-printer-app
-Version: 2.0.0~alpha-5
+Version: 2.0.0~alpha-6
 Section: utils
 Priority: optional
 Architecture: amd64
