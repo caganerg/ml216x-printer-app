@@ -412,7 +412,7 @@ impl Algo0x11 {
             i += step;
         }
 
-        occurrences.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        occurrences.sort_unstable_by_key(|o| core::cmp::Reverse(o.0));
 
         // The 64 most frequent offsets. The table must contain 1 (the
         // previous byte); if it does not, the last slot is reserved for it.
@@ -582,11 +582,12 @@ impl Algo0x11 {
                 let ptr_idx = (b1 & 0x3F) as usize;
                 let offset = ptr_array[ptr_idx] as usize;
                 let match_len = comp_len as usize + 3;
-                let mut ref_pos = out.len() - offset;
-                for _ in 0..match_len {
-                    let b = out[ref_pos];
+                // The reference may overlap the bytes being produced, so the
+                // source index is absolute and re-read as `out` grows.
+                let ref_start = out.len() - offset;
+                for k in 0..match_len {
+                    let b = out[ref_start + k];
                     out.push(b);
-                    ref_pos += 1;
                 }
                 pos += 2;
             } else {
@@ -1744,7 +1745,7 @@ mod tests {
                 as u32
                 + 7)
                 & !7u32;
-        let band_width_bytes = ((page_width_pixels + 7) / 8) as usize;
+        let band_width_bytes = page_width_pixels.div_ceil(8) as usize;
         let cups_line_bytes = header.bytes_per_line as usize;
         let margin_bytes = (band_width_bytes - cups_line_bytes) / 2;
         let bytes_to_copy = cups_line_bytes.min(band_width_bytes - margin_bytes);
