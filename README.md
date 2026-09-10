@@ -222,7 +222,16 @@ through a different path than the one this project tests.
   ```
 
 * **Browsing.** `cups-browsed`, if installed and running, creates its own copy
-  of any queue it discovers over DNS-SD — including this one.
+  of any queue it discovers over DNS-SD — including this one, advertised by
+  your own machine. The copy names itself: with `ML2160` already taken it
+  appends the host name and you get `ML2160_thinkcentre`, or whatever your
+  machine is called. A queue named `<your queue>_<your hostname>` is this and
+  nothing else.
+
+  Turning it off loses nothing here — its job is to surface printers *other*
+  machines share, and this one is attached to yours. Debian 13 no longer
+  installs it by default, so a running one is usually left over from an
+  earlier release.
 
   ```sh
   systemctl status cups-browsed          # inactive or not-found is fine
