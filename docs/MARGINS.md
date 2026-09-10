@@ -177,7 +177,7 @@ estimating in at least that file, so "upstream says X" is evidence, not proof.
 
 ## What it costs to be wrong
 
-`hard_margin_bytes` (`src/main.rs`) converts the margin to pixels and rounds
+`hard_margin_bytes` (`crates/spl2-core/src/geometry.rs`) converts the margin to pixels and rounds
 **up to a whole 8-pixel column**, because the band buffer is byte-addressed.
 That rounding is what turns a fraction of a point into a visible error:
 
@@ -200,7 +200,7 @@ If the true hard margin is larger than the table says, the whole raster lands
 that far to the right of where the engine expects, and the rightmost byte
 column is pushed towards — or past — the edge of the printable area. This is
 the R-1 failure mode, and it is the same class of bug as the D-06 regression
-recorded at `src/main.rs:427`, which was 13 bytes and about 4 mm. A third of a
+recorded in the 1.x filter, which was 13 bytes and about 4 mm. A third of a
 millimetre will not be noticed by eye; it will be measured.
 
 The vertical axis carries the same question. The driver relies on the

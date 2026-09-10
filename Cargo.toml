@@ -1,31 +1,17 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
+# A virtual manifest: the workspace root holds no package of its own. It used
+# to be `rastertospl-rust`, the frozen 1.x CUPS filter, kept in the tree by
+# decision Q-5 until gate P11. P11 was taken on 2026-09-10 — see
+# docs/P11-DELETE-LIST.md for what went and what deliberately stayed. The
+# filter's page loop and its 61 tests did not go: they are
+# `crates/spl2-core/src/replay.rs` and `crates/spl2-core/tests/`, because the
+# golden corpus is the migration's acceptance criterion and had to outlive the
+# binary it measures. The 1.x line remains buildable from the annotated tag
+# `v1.x-final`.
 [workspace]
-# The 1.x filter stays the root package until P11 is green (decision Q-5);
-# ordinary builds select the Printer Application.
 members = ["crates/spl2-core", "crates/pappl-sys", "crates/pappl", "crates/ml216x-printer-app"]
-
-default-members = ["crates/ml216x-printer-app"]
-
-[package]
-# Named for the binary it produces, which is what the PPD's `*cupsFilter` lines
-# and every golden invocation already say. It used to be samsung-2160-rust,
-# after the old repository name.
-name = "rastertospl-rust"
-version = "2.0.0-alpha"
-edition = "2021"
-description = "Legacy CUPS raster front end and golden regression harness for the ML-216x driver"
-license = "GPL-2.0-only"
-
-[dependencies]
-# The frozen filter now drives the shared engine, so the goldens it produces
-# and the ones the printer application will produce come from the same code.
-# It needs the classic CUPS Raster parser, hence `golden-replay` (Q-6).
-spl2-core = { path = "crates/spl2-core", features = ["golden-replay"] }
-
-[[bin]]
-name = "rastertospl-rust"
-path = "src/main.rs"
+resolver = "2"
 
 [profile.release]
 strip = true

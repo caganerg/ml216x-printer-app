@@ -17,7 +17,7 @@ Decided 2026-09-05; see `docs/DECISIONS.md` for the full decision log.
 only.
 
 The SPL2/QPDL side is already implemented and tested: `duplex_mode`
-(`src/main.rs:516`) maps the CUPS `Duplex`/`Tumble` pair to `SplDuplex`,
+(`crates/spl2-core/src/geometry.rs`, `duplex_mode`) maps the CUPS `Duplex`/`Tumble` pair to `SplDuplex`,
 `begin_job` emits `@PJL SET DUPLEX=MANUAL` plus `BINDING=LONGEDGE|SHORTEDGE`,
 and `begin_page` writes the duplex and tumble bytes at page-header offsets
 `0xB` and `0xC`. None of it is reachable today, because
@@ -43,8 +43,9 @@ Three reasons it stays out:
    written. Doing it correctly means buffering a whole page in memory — up to
    roughly 22 MB at the largest accepted geometry.
 
-Both gaps are documented in the code at `src/main.rs:509` and
-`src/main.rs:968`.
+Both gaps are documented in the code, in `crates/spl2-core/src/geometry.rs`
+beside `duplex_mode` and in `crates/spl2-core/src/qpdl.rs`. (They used to be
+cited by line number in `src/main.rs`, which P11 deleted.)
 
 **Requirement for 2.0 despite the exclusion:** publish `sides-supported`
 explicitly as one-sided only, rather than omitting the attribute. IPP clients

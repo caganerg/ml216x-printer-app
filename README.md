@@ -25,11 +25,10 @@ network exposure but does not fix these bugs. See the
 
 | Crate | Licence | What it is |
 |---|---|---|
-| `spl2-core` | GPL-2.0-only | The SPL2/QPDL v3 engine: PJL envelope, page header, Algo 0x11 bands. No C or dependencies; output uses a caller-supplied writer. Byte-for-byte frozen by `goldens/`. |
+| `spl2-core` | GPL-2.0-only | The SPL2/QPDL v3 engine: PJL envelope, page header, Algo 0x11 bands. No C or dependencies; output uses a caller-supplied writer. Byte-for-byte frozen by `goldens/`. Behind `golden-replay` it also holds `replay.rs`, the 1.x filter's page loop, which the corpus is replayed through. |
 | `pappl-sys` | MIT | Hand-written FFI to libpappl, with a C layout probe checking every offset. |
 | `pappl` | MIT | The safe wrapper: RAII handles, the `catch_unwind` callback shim, and the `RasterDriver` seam. |
 | `ml216x-printer-app` | GPL-2.0-only | The printer application: capability table and the SPL2 driver. |
-| `rastertospl-rust` (root) | GPL-2.0-only | Legacy reference front end and golden harness; built explicitly. |
 
 ## Build
 
@@ -40,9 +39,11 @@ Dependencies: Rust 1.77+, `pkg-config`, a C compiler, `libpappl-dev`
 cargo build --release
 ```
 
-The default target is `target/release/ml216x-printer-app`. For the old
-converter, regression harness, or removal of an old manual installation, see
-[Legacy CUPS filter reference](docs/LEGACY-FILTER.md).
+The default target is `target/release/ml216x-printer-app`. The 1.x CUPS filter
+that preceded it was deleted at gate P11 (`docs/P11-DELETE-LIST.md`); it is
+still buildable from the annotated tag `v1.x-final`, and what it produced is
+still pinned here — the corpus in `goldens/` is replayed through
+`crates/spl2-core/src/replay.rs`, which is that filter's own page loop.
 
 ## Debian package (.deb)
 
@@ -413,10 +414,6 @@ and [golden validation](docs/GOLDEN-VALIDATION.md).
 - `crates/ml216x-printer-app/` — the 2.0 binary: the SPL2 raster driver, the
   capability table, and `runtime.rs`, which keeps the control socket out of
   a shared directory (Q-19)
-- `src/main.rs` — the frozen 1.x CUPS filter front end: argv, stdin and stderr
-  only. Its page loop is `crates/spl2-core/src/replay.rs` and the golden-file
-  harness that pins its output is `crates/spl2-core/tests/golden.rs`, so both
-  outlive the gate (P11) that deletes this file
 - `ppd/samsung-ml2160.ppd` — CUPS PPD for the 1.x queue; kept permanently as
   project data
 - `packaging/debian/` — `control`, `copyright`, `changelog` and the maintainer

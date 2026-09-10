@@ -12,7 +12,7 @@ Files: crates/spl2-core/src/qpdl.rs
        crates/spl2-core/src/geometry.rs
        crates/spl2-core/src/engine.rs
        crates/spl2-core/src/media.rs
-       src/main.rs
+       crates/spl2-core/src/replay.rs
        ppd/samsung-ml2160.ppd
 Copyright: 2025-2026 Çağan ERGÜN <73942784+caganerg@users.noreply.github.com>
            2006-2008 Aurélien Croc (AP²C) <aurelien@ap2c.org>
@@ -22,11 +22,13 @@ License: GPL-2
  therefore a derived work and this package cannot be relicensed as GPL-2+.
  .
  The list changed shape in the 2.0 line without changing what is derived: the
- engine moved out of the binary into the spl2-core crate. What this paragraph
- used to call src/spl.rs is now crates/spl2-core/src/qpdl.rs, and the geometry
- rules that used to sit in src/main.rs are now split between
- crates/spl2-core/src/geometry.rs and crates/spl2-core/src/engine.rs. The
- files moved; the transcription did not grow.
+ engine moved out of the binary into the spl2-core crate, and at gate P11 the
+ 1.x filter was deleted while its page loop stayed. What this paragraph used to
+ call src/spl.rs is now crates/spl2-core/src/qpdl.rs, the geometry rules that
+ used to sit in src/main.rs are now split between
+ crates/spl2-core/src/geometry.rs and crates/spl2-core/src/engine.rs, and what
+ src/main.rs held last is crates/spl2-core/src/replay.rs. The files moved; the
+ transcription did not grow.
  .
  crates/spl2-core/src/qpdl.rs states the derivation in its own header: the
  QPDL wire constants, the PJL job header and its exact line order, the 17-byte
@@ -43,23 +45,24 @@ License: GPL-2
  crates/spl2-core/src/media.rs holds one derived constant: the 12.5 pt hard
  margin, which follows SpliX's ML-2165 override.
  .
- src/main.rs is the frozen 1.x CUPS filter front end. It now delegates the
- protocol and the geometry to spl2-core and keeps the SpliX citations at the
- call sites that explain the byte-for-byte behaviour. It is not installed by
- this package; it is kept in the source tree until the migration's P11 gate
- passes.
+ crates/spl2-core/src/replay.rs is the 1.x filter's page loop, which outlived
+ the filter itself at gate P11. It delegates the protocol and the geometry to
+ the rest of spl2-core and keeps the SpliX citations at the call sites that
+ explain the byte-for-byte behaviour — the band stride and the reason
+ cupsCompression is ignored. It is behind the non-default `golden-replay`
+ feature, so the shipping printer application does not contain it.
  .
  ppd/samsung-ml2160.ppd takes its QPDL paper-source codes, media-type
  keywords and band size from the sibling PPDs upstream SpliX ships for this
  engine family (ml1910, ml2010, ml2525, ml1640, ml2510), as its own comments
- record. It is likewise not installed by this package and is kept as project
- data.
+ record. It is not installed by this package and is kept permanently as project
+ data (Q-5); its *cupsFilter lines still name rastertospl-rust, the 1.x binary
+ deleted at P11, because they describe the queue that binary served.
  .
- crates/spl2-core/src/raster.rs, crates/spl2-core/src/replay.rs and
- crates/spl2-core/tests/golden.rs are NOT derived from SpliX: raster.rs
- implements the CUPS Raster container format, replay.rs is the 1.x filter's own
- page loop, moved out of src/main.rs so the corpus outlives that binary, and
- golden.rs is this project's own test harness. Each mentions SpliX once, as a cross-reference
+ crates/spl2-core/src/raster.rs and the two files under
+ crates/spl2-core/tests/ are NOT derived from SpliX: raster.rs implements the
+ CUPS Raster container format, and golden.rs and filter.rs are this project's
+ own test harness and the 1.x filter's own test module, kept after P11. Each mentions SpliX once, as a cross-reference
  rather than as transcribed material.
 Comment: The upstream notice was transcribed from the SpliX 2.0.1 source
  (Debian source package splix 2.0.1-1, from http://splix.ap2c.org/). Every

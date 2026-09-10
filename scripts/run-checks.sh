@@ -149,13 +149,24 @@ run_fmt() {
 }
 
 run_clippy() {
+    # `--features` for the same reason `run_test` gives: without it, the replay
+    # loop and the two test files behind `golden-replay` are not compiled and
+    # so are not linted. `--all-targets` alone does not reach a cfg'd-out file.
     say "clippy (-D warnings)"
-    cargo clippy $CARGO_OFFLINE --workspace --all-targets -- -D warnings
+    cargo clippy $CARGO_OFFLINE --workspace --all-targets \
+        --features spl2-core/golden-replay -- -D warnings
 }
 
 run_test() {
+    # `golden-replay` is named explicitly. It used to arrive for free: the root
+    # package was the 1.x filter and it depended on spl2-core with the feature
+    # on, so a workspace build unified it in. P11 deleted that package, and
+    # without this flag the golden corpus and the filter's 61 tests are cfg'd
+    # out of the run and pass by not existing. Q-6 keeps the feature
+    # non-default, so the shipping application still compiles without it —
+    # `run_features` is what proves that.
     say "test: the whole workspace"
-    cargo test $CARGO_OFFLINE --workspace
+    cargo test $CARGO_OFFLINE --workspace --features spl2-core/golden-replay
 }
 
 run_features() {

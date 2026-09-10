@@ -1,232 +1,50 @@
-//! The frozen 1.x CUPS raster filter.
+#![cfg(feature = "golden-replay")]
+// SPDX-License-Identifier: GPL-2.0-only
+
+//! What the 1.x CUPS filter's own test module tested, kept after the filter
+//! itself was deleted at gate P11.
 //!
-//! The protocol engine moved to the `spl2-core` crate during the PAPPL
-//! migration; what stays here is the CUPS filter front end — argv, stdin,
-//! stderr and the page loop that drives the engine. Decision Q-5 freezes this
-//! binary's behaviour, so the golden corpus must not move when this file does.
+//! Almost none of it was about being a filter. These 61 tests exercise the
+//! engine through the replay loop — page-header validation, the job budget,
+//! band geometry, duplex, and the PPD-versus-limits cross-checks that keep the
+//! published capabilities honest — so they belong beside the engine rather
+//! than beside the argv parsing that went. The shim below stands in for the
+//! front end they used to call: the filter supplied a stderr log and two argv
+//! fields, and a test needs neither. (The margin-taking variant these tests do
+//! not use is `replay::process_with_margin`, which `golden.rs` drives.)
 
-use std::env;
-use std::fs::File;
-use std::io::{self, BufReader, Read, Write};
-use std::process;
+use std::io::{self, Read, Write};
 
-use spl2_core::geometry::quote_untrusted;
-use spl2_core::log::{Level, Log};
-use spl2_core::media;
-use spl2_core::qpdl::current_service_date;
-use spl2_core::replay::{process_with_margin as replay_with_margin, JobIdentity};
+use spl2_core::log::NoLog;
+use spl2_core::replay::{self, JobIdentity};
 
-/// Sends the engine's diagnostics to stderr with the prefixes CUPS routes on.
-///
-/// `spl2-core` may not own stderr (`docs/MIGRATION-PLAN.md` §7), so the filter
-/// supplies the sink. The strings themselves are unchanged, which is why the
-/// prefix is spelled out here rather than derived.
-struct CupsFilterLog;
-
-impl Log for CupsFilterLog {
-    fn log(&self, level: Level, message: &str) {
-        let prefix = match level {
-            Level::Debug => "DEBUG",
-            Level::Info => "INFO",
-            Level::Warning => "WARNING",
-            Level::Error => "ERROR",
-            Level::Page => "PAGE",
-        };
-        eprintln!("{}: {}", prefix, message);
-    }
-}
-
-/// CUPS filter arguments.
-/// Standard invocation: `filter job-id user title num-copies options [filename]`
-///
-/// `num_copies` (argv[4]) and `options` (argv[5]) are DELIBERATELY not read;
-/// the fields are kept only for diagnostics and positional correctness. The
-/// reason: this is a raster filter, and the cups-filters stage that runs before
-/// it in the chain (`gstoraster`/`pdftoraster`) has already interpreted the PPD
-/// and written the selected media, resolution and copy count into the CUPS
-/// Raster PAGE HEADER. When the page header and the command line disagree, the
-/// header is binding — the page data was produced to match it. Reading options
-/// here would mean writing a header that contradicts the produced data.
-#[allow(dead_code)]
-#[derive(Default)]
-struct CupsFilterArgs {
-    pub job_id: Option<String>,
-    pub user: Option<String>,
-    pub title: Option<String>,
-    pub num_copies: Option<String>,
-    pub options: Option<String>,
-    pub filename: Option<String>,
-}
-
-impl CupsFilterArgs {
-    fn parse(args: &[String]) -> Self {
-        if args.len() >= 6 {
-            Self {
-                job_id: Some(args[1].clone()),
-                user: Some(args[2].clone()),
-                title: Some(args[3].clone()),
-                num_copies: Some(args[4].clone()),
-                options: Some(args[5].clone()),
-                filename: args.get(6).cloned(),
-            }
-        } else if args.len() == 2 && !args[1].starts_with('-') {
-            // Direct file mode: `cargo run -- file.raster`
-            Self {
-                filename: Some(args[1].clone()),
-                ..Self::default()
-            }
-        } else {
-            Self::default()
-        }
-    }
-}
-
-fn main() {
-    // `env::args()` panics on an invalid UTF-8 byte in argv; but these
-    // arguments (`job-id user title copies options [file]`) are derived by
-    // `cupsd` from fields the submitting client supplied (e.g. job-name) and
-    // must be treated as untrusted. So that a corrupt/malicious header cannot
-    // crash the filter (a DoS) while it is still reading its first argument,
-    // `env::args_os()` + a lossy UTF-8 conversion is used: invalid bytes are
-    // silently replaced with `U+FFFD` and there is no panic.
-    let raw_args: Vec<String> = env::args_os()
-        .map(|s| s.to_string_lossy().into_owned())
-        .collect();
-
-    // CUPS filters are normally invoked with
-    // `filter job-id user title copies options [file]` (5-6 arguments). Running
-    // the program with no arguments at all (just the binary name) is not a real
-    // `cupsd` invocation — it is either a misconfiguration or a manual/probing
-    // run. This was verified by running the closest architectural equivalents
-    // of this tool, `/usr/lib/cups/filter/rastertopwg` and `pstops`: both print
-    // a "Usage: ..." message and exit with code 1 in this case; they do NOT
-    // implement the "list supported MIME types and exit 0" behaviour specific
-    // to CUPS *backends* (that behaviour is for device-discovering backends,
-    // not for filters). So the same approach is taken here: exit early with a
-    // clear usage message before attempting to read an empty stdin.
-    if raw_args.len() <= 1 {
-        let prog = raw_args
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "rastertospl-rust".to_string());
-        eprintln!("Usage: {} job-id user title copies options [file]", prog);
-        process::exit(1);
-    }
-
-    let args = CupsFilterArgs::parse(&raw_args);
-
-    // `user`, `title` and `job_id` come from the submitting client (via CUPS)
-    // and must be treated as untrusted: using `{:?}` (Debug) instead of `{}`
-    // prints embedded ANSI/terminal escape sequences and control characters
-    // (e.g. ESC, CR) in escaped form like `\u{1b}`, preventing fake log-line
-    // injection or triggering terminal-emulator vulnerabilities. Although
-    // `job_id` is a numeric string in the normal flow, that guarantee does not
-    // hold when the filter is invoked by hand with manipulated arguments.
-    if let (Some(job), Some(user)) = (&args.job_id, &args.user) {
-        eprintln!("DEBUG: CUPS Job ID: {:?}, User: {:?}", job, user);
-    }
-    if let Some(title) = &args.title {
-        eprintln!("DEBUG: CUPS Title: {:?}", title);
-    }
-
-    let input_reader: Box<dyn Read> = match &args.filename {
-        Some(path) => {
-            eprintln!(
-                "DEBUG: reading CUPS Raster from file: {}",
-                quote_untrusted(path)
-            );
-            match File::open(path) {
-                Ok(file) => Box::new(BufReader::new(file)),
-                Err(err) => {
-                    eprintln!(
-                        "ERROR: could not open the raster file {}: {}",
-                        quote_untrusted(path),
-                        err
-                    );
-                    process::exit(1);
-                }
-            }
-        }
-        None => {
-            eprintln!("DEBUG: reading CUPS Raster from standard input (stdin)");
-            Box::new(BufReader::new(io::stdin()))
-        }
-    };
-
-    // `process_cups_raster_to_spl` keeps the `SplStreamWriter` LOCAL: when an
-    // error returns via `?`, the writer is dropped before reaching this line
-    // and its `Drop` impl writes the closing UEL. Because `process::exit` does
-    // not run `Drop`, the ordering matters — the error is reported here, after
-    // the writer has already been dropped.
-    if let Err(err) =
-        process_cups_raster_to_spl(&args, input_reader, io::stdout(), &current_service_date())
-    {
-        eprintln!("ERROR: raster processing error: {}", err);
-        process::exit(1);
-    }
-}
-
-/// Reads the standard CUPS Raster stream and converts it to Samsung QPDL/SPL2.
-///
-/// The loop itself now lives in `spl2_core::replay`, so that the golden corpus
-/// outlives this binary: gate P11 deletes the front end, not the harness. What
-/// stays here is what a CUPS filter is — argv, stdin, stderr — and these two
-/// wrappers, which supply the stderr sink and the two argv fields the loop
-/// reads. Behaviour is unchanged, and the goldens are what says so.
+/// The 1.x filter's `process_cups_raster_to_spl`: the driver's hard margin,
+/// and diagnostics discarded rather than printed.
 fn process_cups_raster_to_spl<W: Write>(
-    args: &CupsFilterArgs,
+    identity: &JobIdentity,
     reader: Box<dyn Read>,
     writer: W,
     service_date: &str,
 ) -> io::Result<()> {
-    process_with_margin(args, reader, writer, service_date, media::HARD_MARGIN_PT)
+    replay::process(identity, reader, writer, service_date, &NoLog)
 }
 
-/// The production path always supplies the driver constant. The explicit input
-/// also preserves synthetic geometry cases in the golden harness.
-fn process_with_margin<W: Write>(
-    args: &CupsFilterArgs,
-    reader: Box<dyn Read>,
-    writer: W,
-    service_date: &str,
-    margin_pt: f64,
-) -> io::Result<()> {
-    replay_with_margin(
-        &identity_of(args),
-        reader,
-        writer,
-        service_date,
-        margin_pt,
-        &CupsFilterLog,
-    )
-}
-
-/// The job title and user, which are the only argv fields the loop reads.
-fn identity_of(args: &CupsFilterArgs) -> JobIdentity {
-    JobIdentity {
-        title: args.title.clone(),
-        user: args.user.clone(),
-    }
-}
-
-#[cfg(test)]
 mod tests {
-    use super::*;
-    // The engine moved to `spl2-core`; these tests still exercise it, and are
-    // the reason the split has to be behaviour preserving rather than merely
-    // compiling.
+    use super::process_cups_raster_to_spl;
     use spl2_core::geometry::*;
     // The engine's own types, imported here rather than at the top of the file:
     // the front end that survives P11 does not name them, and the test module
     // does. See the `replay` module for where the loop went.
     use spl2_core::qpdl::{self as spl, Algo0x11, SplDuplex, SplResolution};
     use spl2_core::raster::{CupsRasterVersion, PageHeader};
-    use spl2_core::replay::validate_page_header;
+    use spl2_core::replay::{validate_page_header, JobIdentity};
+    use spl2_core::{media, qpdl::current_service_date};
+    use std::io;
     use std::io::Cursor;
 
     /// Represents an argument-less (direct pipeline) invocation.
-    fn no_args() -> CupsFilterArgs {
-        CupsFilterArgs::default()
+    fn no_args() -> JobIdentity {
+        JobIdentity::default()
     }
 
     /// Reads the project's PPD file. Some of the tests below tie the filter's
@@ -235,7 +53,7 @@ mod tests {
     fn ppd_text() -> String {
         std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/ppd/samsung-ml2160.ppd"
+            "/../../ppd/samsung-ml2160.ppd"
         ))
         .expect("could not read the PPD")
     }

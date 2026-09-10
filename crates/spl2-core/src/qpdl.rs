@@ -1723,7 +1723,12 @@ mod tests {
         assert_eq!(decomp, sample, "decompressed content mismatch");
     }
 
+    /// Reads a real raster, so it needs the classic parser `golden-replay`
+    /// gates (Q-6). Without the feature there is no `crate::raster` for it to
+    /// use, and a unit test that cannot compile in a configuration this
+    /// project builds is a broken configuration, not a strict one.
     #[test]
+    #[cfg(feature = "golden-replay")]
     fn test_algo0x11_roundtrip_real_band0() {
         use crate::raster::CupsRasterReader;
         use std::fs::File;

@@ -989,7 +989,16 @@ without archaeology. Expose no vendor option for it now. Recorded in
 - A concrete list of files to **stop shipping** versus **stop keeping** must be
   written out and approved separately before anything is deleted.
 
-**P11 prepared, not taken (2026-09-10).** The removal was entangled with the
+**P11 taken (2026-09-10), earlier than this decision intended.** The
+maintainer chose to delete the 1.x filter before G-1 was measured. What that
+costs is recorded at the top of `docs/P11-DELETE-LIST.md`: the hardware
+comparison against 1.x now starts with `git checkout v1.x-final` instead of a
+crate in this tree. It costs nothing the corpus proves, because of the
+preparation described next: `src/main.rs` went, and its page loop, its 61
+tests and the goldens did not. `goldens/SHA256SUMS` is unchanged by the
+deletion, which is what says the two are separable.
+
+**P11 prepared (2026-09-10, hours earlier).** The removal was entangled with the
 evidence: the golden harness lived in the filter's own package and drove it
 through `crate::process_with_margin`, so deleting the filter would have deleted
 the corpus's only reader. The page loop is now

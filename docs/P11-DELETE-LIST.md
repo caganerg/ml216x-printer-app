@@ -1,20 +1,25 @@
-# P11 — what deleting the 1.x filter means, and what has to be true first
+# P11 — the 1.x filter, deleted
 
-Decision Q-5 keeps the 1.x CUPS filter in the tree and says the removal needs
-its own approval and its own list. This is that list, written **before** the
-gate opens rather than during it, and reviewed on 2026-09-10 with the
-preparation it called for now done.
+**Taken on 2026-09-10 by the maintainer's decision.** This file was written
+first as the list Q-5 required, then followed. It is kept as the record of what
+went, what stayed, and what the deletion cost.
 
-## The gate
+## The gate, and the decision to open it early
 
-**P11 may not be taken until release gate G-1 has been measured on paper**
-(`docs/G1-MEASUREMENT.md`). The 1.x filter is the reference the 2.0 output is
-judged against; deleting the reference before the comparison is made would
-leave nothing to compare with. Q-7 records a second reason: the 1.x static
-musl binary is the only build that runs on a distribution the `.deb` does not
-target, so it is also the fallback until the package's reach is not a question.
+This list originally said: **P11 may not be taken until release gate G-1 has
+been measured on paper** (`docs/G1-MEASUREMENT.md`), because the 1.x filter is
+the reference the 2.0 output is judged against, and because Q-7 records that
+the 1.x static musl binary is the only build that runs where the `.deb` cannot.
 
-## Preparation, done 2026-09-10
+The maintainer chose to take it before that measurement. What that costs, so
+the choice is legible later: comparing a suspect 2.0 page against the same
+document printed through 1.x now needs `git checkout v1.x-final` and a build
+from the tag, rather than a crate in this tree. The comparison remains
+possible; it is one step further away. Nothing that the corpus proves was lost
+— see the preparation below, which is why this was a deletion of front-end code
+and not of evidence.
+
+## Preparation, done first
 
 The removal used to be entangled with the evidence. `src/golden.rs` — the
 harness that freezes 32 SPL2 streams byte for byte — lived in the same package
@@ -34,9 +39,7 @@ That is no longer true:
 
 So P11 is now a deletion of front-end code, not of evidence.
 
-## The list
-
-Delete:
+## What went
 
 | Path | What it is |
 |---|---|
@@ -44,7 +47,14 @@ Delete:
 | `Cargo.toml` root `[package]`, `[[bin]]` and `[dependencies]` | the `rastertospl-rust` package itself; the file becomes a virtual workspace manifest |
 | `docs/LEGACY-FILTER.md` | how to build and run the reference |
 
-Keep, and do not confuse with the above:
+`src/main.rs` was 1793 lines and 61 of them were `#[test]`. Almost none of
+those tests were about being a filter, so they went to
+`crates/spl2-core/tests/filter.rs` rather than to the bin: page-header
+validation, the job budget, band geometry, duplex, and the PPD-versus-limits
+cross-checks. All 61 pass there. What was actually deleted is argv parsing,
+the stdin/stdout wiring and the stderr `Log` implementation.
+
+## What stayed
 
 | Path | Why it stays |
 |---|---|
@@ -53,22 +63,27 @@ Keep, and do not confuse with the above:
 | `ppd/samsung-ml2160.ppd` | permanent project data (Q-5), and the source of the hard-margin table |
 | the `v1.x-final` tag | the recovery anchor; the 1.x line is reachable from it forever |
 
-## What the deletion itself has to do
+## What the deletion did
 
-1. Move the filter tests worth keeping. `src/main.rs`'s test module holds
-   checks that are not about argv: the PPD-versus-limits tests, and the
-   `validate_page_header` cases. The PPD cross-check already has a second home
-   in `crates/ml216x-printer-app/src/media_table.rs`; the header-validation
-   cases belong next to `validate_page_geometry` in `spl2-core`. Decide
-   per test, do not delete in bulk.
-2. Turn the root manifest into a virtual workspace, and drop `default-members`,
-   which exists only to stop `cargo build` selecting the filter.
-3. Update `scripts/run-checks.sh`, `.github/workflows/checks.yml`,
-   `CONTRIBUTING.md`, `README.md` and `packaging/debian/copyright` — the last
-   one names `src/main.rs` in the SpliX derivation stanza, and that stanza must
-   keep naming every file that carries transcribed material.
-4. Re-run the full check list. The goldens must be untouched by the deletion:
-   if a `.spl` file moves, something was deleted that was not front-end code.
+1. **Moved the tests worth keeping**, per test rather than in bulk: the whole
+   module went to `crates/spl2-core/tests/filter.rs`, where it drives
+   `replay::process` with a discarding log instead of the filter's stderr one.
+2. **Turned the root manifest into a virtual workspace** and dropped
+   `default-members`, which existed only to stop `cargo build` selecting the
+   filter. `Cargo.lock` lost the `rastertospl-rust` entry.
+3. **Repointed every reference**: `README.md`, `docs/NON-GOALS.md` and
+   `docs/MARGINS.md` cited `src/main.rs` by name and by line number;
+   `packaging/debian/copyright` named it in the SpliX derivation stanza, which
+   now names `crates/spl2-core/src/replay.rs` instead — the transcribed
+   material moved with the loop and the stanza must keep naming every file that
+   carries it.
+4. **Re-ran the full check list.** The goldens are untouched: no `.spl` file
+   and no line of `goldens/SHA256SUMS` changed, which is the evidence that what
+   was deleted was front-end code.
+
+The PPD keeps its `*cupsFilter` lines naming `rastertospl-rust`. That is not an
+oversight: the PPD describes the 1.x queue, is kept as project data rather than
+installed, and rewriting it would falsify a record.
 
 ## What it does not do
 
