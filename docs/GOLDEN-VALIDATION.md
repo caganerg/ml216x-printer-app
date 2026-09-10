@@ -38,7 +38,9 @@ length to its golden and differs in exactly **two bytes** — the day and the
 last digit of `@PJL DEFAULT SERVICEDATE=20260101`, which the corpus pins and
 the 1.x binary reads from the clock. With that line normalised, the streams are
 byte-for-byte identical. The raster inputs are generated deterministically by
-`build_raster` in `src/golden.rs`; the filter's argv `num_copies` is
+`build_raster` in `crates/spl2-core/tests/golden.rs` (it was `src/golden.rs`
+until 2026-09-10, when the harness moved so that it would outlive the 1.x
+binary it measures); the filter's argv `num_copies` is
 deliberately ignored (`src/main.rs:22`), so copies come from the raster header
 in both paths.
 

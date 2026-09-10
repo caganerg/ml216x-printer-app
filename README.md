@@ -395,8 +395,10 @@ and [golden validation](docs/GOLDEN-VALIDATION.md).
 - `crates/ml216x-printer-app/` — the 2.0 binary: the SPL2 raster driver, the
   capability table, and `runtime.rs`, which keeps the control socket out of
   a shared directory (Q-19)
-- `src/main.rs`, `src/golden.rs` — the frozen 1.x CUPS filter front end and the
-  golden-file harness that pins its output
+- `src/main.rs` — the frozen 1.x CUPS filter front end: argv, stdin and stderr
+  only. Its page loop is `crates/spl2-core/src/replay.rs` and the golden-file
+  harness that pins its output is `crates/spl2-core/tests/golden.rs`, so both
+  outlive the gate (P11) that deletes this file
 - `ppd/samsung-ml2160.ppd` — CUPS PPD for the 1.x queue; kept permanently as
   project data
 - `packaging/debian/` — `control`, `copyright`, `changelog` and the maintainer

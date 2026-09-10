@@ -16,7 +16,7 @@ Build and run the reference explicitly:
 cargo build --release -p rastertospl-rust
 cupsfilter -p ppd/samsung-ml2160.ppd -m application/vnd.cups-raster -- doc.pdf > test.raster
 ./target/release/rastertospl-rust 101 testuser Test 1 "" test.raster > out.spl
-cargo test -p rastertospl-rust golden
+cargo test -p spl2-core --features golden-replay --test golden
 ```
 
 The current reference uses 12.5 pt margins; historical 12 pt measurements do

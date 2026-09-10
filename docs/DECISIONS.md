@@ -914,6 +914,17 @@ without archaeology. Expose no vendor option for it now. Recorded in
 - A concrete list of files to **stop shipping** versus **stop keeping** must be
   written out and approved separately before anything is deleted.
 
+**P11 prepared, not taken (2026-09-10).** The removal was entangled with the
+evidence: the golden harness lived in the filter's own package and drove it
+through `crate::process_with_margin`, so deleting the filter would have deleted
+the corpus's only reader. The page loop is now
+`crates/spl2-core/src/replay.rs` and the harness is
+`crates/spl2-core/tests/golden.rs`; all 32 goldens matched byte for byte across
+the move and `goldens/SHA256SUMS` did not change. What P11 deletes is now front-end code
+only, and the list of it is `docs/P11-DELETE-LIST.md`. The gate
+itself is unchanged: **G-1 must be measured on paper first**, because the 1.x
+filter is the reference the 2.0 output is compared against.
+
 ### Q-6 — Does `spl2-core` keep the CUPS raster parser
 **Decision: keep `raster.rs`, behind a non-default Cargo feature named
 `golden-replay` — not `#[cfg(test)]`.**

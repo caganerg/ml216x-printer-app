@@ -18,7 +18,7 @@ before the move to a PAPPL Printer Application. The acceptance criterion is
 byte-for-byte identity (project rule 6), and that criterion needs a reference
 to compare against.
 
-The code that produces and compares them: [`../src/golden.rs`](../src/golden.rs).
+The code that produces and compares them: [`../crates/spl2-core/tests/golden.rs`](../crates/spl2-core/tests/golden.rs).
 
 ## Files
 
@@ -29,23 +29,23 @@ The code that produces and compares them: [`../src/golden.rs`](../src/golden.rs)
 | `SHA256SUMS` | Checksums of every file above, so a validated corpus has a fixed reference |
 
 The raster **inputs** are not kept in the repository; `build_raster` in
-`src/golden.rs` generates them deterministically (the A4 @1200 DPI input alone
+`crates/spl2-core/tests/golden.rs` generates them deterministically (the A4 @1200 DPI input alone
 is ~16 MB).
 
 ## Usage
 
 ```sh
 # Compare (the default; on every `cargo test --workspace` run)
-cargo test -p rastertospl-rust golden
+cargo test -p spl2-core --features golden-replay --test golden
 
 # Refresh AFTER a deliberate behaviour change
-UPDATE_GOLDENS=1 cargo test -p rastertospl-rust golden
+UPDATE_GOLDENS=1 cargo test -p spl2-core --features golden-replay --test golden
 
 # Verify the committed bytes (from the repository root)
 (cd goldens && sha256sum -c SHA256SUMS)
 
 # Export the inputs (for manual inspection / comparison with the installed binary)
-DUMP_GOLDEN_RASTER=/tmp/r cargo test -p rastertospl-rust golden
+DUMP_GOLDEN_RASTER=/tmp/r cargo test -p spl2-core --features golden-replay --test golden
 ```
 
 Every diff in a `.spl` file means **the bytes going to the printer changed**.

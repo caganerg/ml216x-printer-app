@@ -5,26 +5,16 @@
 //! stderr and the page loop that drives the engine. Decision Q-5 freezes this
 //! binary's behaviour, so the golden corpus must not move when this file does.
 
-/// The golden-file test harness; see `src/golden.rs`.
-#[cfg(test)]
-mod golden;
-
 use std::env;
 use std::fs::File;
 use std::io::{self, BufReader, Read, Write};
 use std::process;
 
-use spl2_core::engine::PageSetup;
-use spl2_core::geometry::{
-    duplex_mode, pjl_paper_type_for, quote_untrusted, validate_page_geometry, JobBudget,
-    PageGeometry,
-};
+use spl2_core::geometry::quote_untrusted;
 use spl2_core::log::{Level, Log};
 use spl2_core::media;
-use spl2_core::qpdl::{
-    self as spl, current_service_date, JobConfig, SplPaperSource, SplStreamWriter,
-};
-use spl2_core::raster::{CupsRasterReader, PageHeader};
+use spl2_core::qpdl::current_service_date;
+use spl2_core::replay::{process_with_margin as replay_with_margin, JobIdentity};
 
 /// Sends the engine's diagnostics to stderr with the prefixes CUPS routes on.
 ///
@@ -44,32 +34,6 @@ impl Log for CupsFilterLog {
         };
         eprintln!("{}: {}", prefix, message);
     }
-}
-
-/// The CUPS page header, as the engine sees it.
-fn geometry_of(header: &PageHeader) -> PageGeometry {
-    PageGeometry {
-        width: header.width,
-        height: header.height,
-        bytes_per_line: header.bytes_per_line,
-        hw_resolution: header.hw_resolution,
-        page_size_points: header.page_size_points,
-        margins: header.margins,
-        bits_per_color: header.bits_per_color,
-        bits_per_pixel: header.bits_per_pixel,
-        color_space: header.color_space,
-        color_order: header.color_order,
-        num_copies: header.num_copies,
-        media_position: header.media_position,
-        duplex: header.duplex,
-        tumble: header.tumble,
-        media_type: header.media_type.clone(),
-    }
-}
-
-/// Kept so the filter's own tests keep naming the check they exercise.
-fn validate_page_header(header: &PageHeader) -> io::Result<()> {
-    validate_page_geometry(&geometry_of(header))
 }
 
 /// CUPS filter arguments.
@@ -204,17 +168,11 @@ fn main() {
 
 /// Reads the standard CUPS Raster stream and converts it to Samsung QPDL/SPL2.
 ///
-/// `writer` is taken as a parameter (rather than using `io::stdout()` directly)
-/// so tests can inspect the produced SPL stream; in particular it is needed to
-/// verify that the closing UEL is written on error paths.
-///
-/// `service_date` is supplied FROM OUTSIDE for the same reason (rather than
-/// calling `current_service_date()` directly): because the
-/// `@PJL DEFAULT SERVICEDATE` line carries today's date, the produced stream
-/// would be clock-dependent and the golden-file comparison would break every
-/// midnight. Loosening the comparison instead of fixing the date would also
-/// hide real deviations; see `src/golden.rs`. `main` still passes
-/// `current_service_date()`, so runtime behaviour does not change.
+/// The loop itself now lives in `spl2_core::replay`, so that the golden corpus
+/// outlives this binary: gate P11 deletes the front end, not the harness. What
+/// stays here is what a CUPS filter is — argv, stdin, stderr — and these two
+/// wrappers, which supply the stderr sink and the two argv fields the loop
+/// reads. Behaviour is unchanged, and the goldens are what says so.
 fn process_cups_raster_to_spl<W: Write>(
     args: &CupsFilterArgs,
     reader: Box<dyn Read>,
@@ -224,8 +182,8 @@ fn process_cups_raster_to_spl<W: Write>(
     process_with_margin(args, reader, writer, service_date, media::HARD_MARGIN_PT)
 }
 
-// The production path always supplies the driver constant. The explicit input
-// also preserves synthetic geometry cases in the golden harness.
+/// The production path always supplies the driver constant. The explicit input
+/// also preserves synthetic geometry cases in the golden harness.
 fn process_with_margin<W: Write>(
     args: &CupsFilterArgs,
     reader: Box<dyn Read>,
@@ -233,202 +191,22 @@ fn process_with_margin<W: Write>(
     service_date: &str,
     margin_pt: f64,
 ) -> io::Result<()> {
-    if !margin_pt.is_finite() || margin_pt <= 0.0 || margin_pt > 36.0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "invalid driver hard margin",
-        ));
-    }
-    // 1. CUPS Raster header/magic check (RaSt, RaS2, RaS3, etc.)
-    let mut raster_reader = CupsRasterReader::new(reader)?;
-
-    eprintln!(
-        "INFO: valid CUPS Raster stream detected (version: {:?}, endian: {})",
-        raster_reader.version(),
-        if raster_reader.version().is_big_endian() {
-            "Big Endian"
-        } else {
-            "Little Endian"
-        }
-    );
-
-    let mut spl_writer = SplStreamWriter::new(writer);
-
-    // Read the first page header before starting the job (begin_job): CUPS
-    // Raster carries the duplex information in the PAGE header, but the PJL job
-    // header must report duplex at the JOB level. So we "peek" the first header
-    // and set up the job config from it; we do not read it again in the loop.
-    let mut next_header = raster_reader.next_page_header()?;
-
-    let job_duplex = match &next_header {
-        Some(h) => duplex_mode(h.duplex, h.tumble),
-        None => spl::SplDuplex::Simplex,
-    };
-
-    // The paper type, like duplex, is reported at the JOB level (PJL), whereas
-    // CUPS carries it in the PAGE header; so the same "peek the first header"
-    // pattern is used. A different paper type per page cannot be expressed in
-    // QPDL anyway.
-    let job_paper_type = match &next_header {
-        Some(h) => pjl_paper_type_for(&h.media_type, &CupsFilterLog),
-        None => spl::PJL_PAPERTYPE_DEFAULT,
-    };
-
-    // 2. Samsung ML-2160 series PJL header (@PJL ENTER LANGUAGE = QPDL)
-    let job_config = JobConfig {
-        job_name: args
-            .title
-            .clone()
-            .unwrap_or_else(|| "CUPS Document".to_string()),
-        user_name: args.user.clone().unwrap_or_else(|| "guest".to_string()),
-        service_date: service_date.to_string(),
-        duplex: job_duplex,
-        paper_type: job_paper_type,
-    };
-    spl_writer.begin_job(&job_config)?;
-
-    let mut page_number = 0;
-    let mut budget = JobBudget::default();
-
-    // 3. Page loop
-    while let Some(header) = next_header.take() {
-        validate_page_header(&header)?;
-
-        // The copy count is normalised once and the SAME value goes to both
-        // the budget and the printer; computing it separately in two places
-        // would make the budget count copies that are never actually printed.
-        let geometry = geometry_of(&header);
-        let copies = spl2_core::geometry::sanitize_copies(header.num_copies);
-
-        // The page-count, raw-raster-volume and sheet-count limits; see
-        // `JobBudget` for the rationale. Counted AFTER validation, so a
-        // rejected page does not consume the budget.
-        page_number = budget.account_page(geometry.total_raster_bytes(), copies)?;
-
-        // The same value as `sanitize_copies` is logged: otherwise this line
-        // could show the raw/unbounded `header.num_copies` value, different
-        // from the copy count actually sent to the printer (written below via
-        // begin_page/end_page through sanitize_copies()), producing misleading
-        // diagnostics (e.g. if 65536 is requested, "65536" would be written here
-        // but 999 sent to the printer).
-        eprintln!("PAGE: {} {}", page_number, copies);
-        eprintln!("INFO: starting page {}...", page_number);
-
-        print_header_info(page_number, &header);
-
-        // `cupsCompression` in CUPS Raster is not STREAM compression but a
-        // driver-specific "device compression" hint (stream compression is
-        // determined by the sync word; see raster.rs is_compressed). SpliX does
-        // not use this field, and this filter always does band compression with
-        // Algo 0x11; so the field is deliberately ignored. If it is non-zero we
-        // report it once for diagnostics, because there may be a mismatch
-        // between the PPD and this filter's assumptions.
-        if header.compression != 0 {
-            eprintln!(
-                "WARNING: cupsCompression={} ignored; band compression is always Algo 0x11 RLE.",
-                header.compression
-            );
-        }
-
-        // Geometry, placement and the 17-byte page header are now in
-        // `spl2-core`: the same computation runs on the PAPPL path too, so the
-        // two front ends cannot diverge.
-        let setup = PageSetup::new(&geometry, margin_pt, page_number, &CupsFilterLog)?;
-
-        // The 17-byte QPDL page header
-        spl_writer.begin_page(&setup.config)?;
-
-        // Transfer the page bands with the SpliX-compatible stride
-        let mut encoder = setup.encoder();
-        let mut line_buffer = vec![0u8; setup.cups_bytes_per_line];
-        for _ in 0..setup.total_lines {
-            raster_reader.read_line(&mut line_buffer)?;
-            encoder.write_line(&mut spl_writer, &line_buffer)?;
-        }
-        encoder.finish(&mut spl_writer)?;
-
-        // The 3-byte QPDL page footer
-        spl_writer.end_page(copies)?;
-
-        eprintln!("INFO: page {} complete.\n", page_number);
-
-        next_header = raster_reader.next_page_header()?;
-    }
-
-    if page_number == 0 {
-        eprintln!("WARNING: no pages found in the CUPS Raster stream.");
-    } else {
-        eprintln!(
-            "INFO: {} pages successfully converted to SPL/QPDL format.",
-            page_number
-        );
-    }
-
-    // Job end (the PJL UEL). Called even if no page was found: because
-    // `begin_job` has already put the printer into QPDL, the stream must end
-    // with a closing UEL in any case. `end_job` flushes internally.
-    spl_writer.end_job()?;
-    Ok(())
+    replay_with_margin(
+        &identity_of(args),
+        reader,
+        writer,
+        service_date,
+        margin_pt,
+        &CupsFilterLog,
+    )
 }
 
-/// Formats the metadata from the CUPS Raster page header and prints it to stderr.
-fn print_header_info(page_num: u32, header: &PageHeader) {
-    // Every line starts with `DEBUG: `. CUPS routes the prefixes it recognises
-    // in a filter's stderr (DEBUG/INFO/WARNING/ERROR/PAGE/...) to that level;
-    // it also treats UNPREFIXED lines as DEBUG, so under the default
-    // `LogLevel warn` the behaviour is the same. The difference showed up at
-    // `LogLevel debug`: this block produces ~15 lines per page and the
-    // unprefixed lines left the intent unclear. The prefix tells both CUPS and
-    // the log reader plainly that the lines are diagnostic.
-    eprintln!("DEBUG: --------------------------------------------------");
-    eprintln!("DEBUG:  [CUPS RASTER PAGE {} METADATA]", page_num);
-    eprintln!(
-        "DEBUG:   Resolution (DPI): {} x {}",
-        header.hw_resolution[0], header.hw_resolution[1]
-    );
-    eprintln!(
-        "DEBUG:   Dimensions (px) : {} x {} (width x height)",
-        header.width, header.height
-    );
-    eprintln!(
-        "DEBUG:   Page size (pt)  : {} x {} pt",
-        header.page_size_points[0], header.page_size_points[1]
-    );
-    if let Some(name) = &header.page_size_name {
-        // `cupsPageSizeName` is a 64-byte C string in the raster header coming
-        // from the submitting client — as untrusted as `title`/`user` in argv,
-        // so it is printed escaped rather than raw.
-        eprintln!("DEBUG:   Media name      : {}", quote_untrusted(name));
+/// The job title and user, which are the only argv fields the loop reads.
+fn identity_of(args: &CupsFilterArgs) -> JobIdentity {
+    JobIdentity {
+        title: args.title.clone(),
+        user: args.user.clone(),
     }
-    eprintln!("DEBUG:   Colour space    : {}", header.color_space);
-    eprintln!("DEBUG:   Colour order    : {:?}", header.color_order);
-    eprintln!("DEBUG:   Bits per colour : {}", header.bits_per_color);
-    eprintln!("DEBUG:   Bits per pixel  : {}", header.bits_per_pixel);
-    eprintln!("DEBUG:   Bytes per line  : {} bytes", header.bytes_per_line);
-    eprintln!(
-        "DEBUG:   Raw raster size : {} bytes ({:.2} MB)",
-        header.total_raster_bytes(),
-        header.total_raster_bytes() as f64 / (1024.0 * 1024.0)
-    );
-    eprintln!(
-        "DEBUG:   Duplex          : {}",
-        if header.duplex { "on" } else { "off" }
-    );
-    eprintln!("DEBUG:   Copies          : {}", header.num_copies);
-    eprintln!(
-        "DEBUG:   Paper source    : MediaPosition={} -> {:?}",
-        header.media_position,
-        SplPaperSource::from_media_position(header.media_position)
-    );
-    // `pjl_paper_type_for` prints the warning once while the job header is set
-    // up; here only the result of the mapping is shown (to avoid a warning
-    // repeated per page).
-    eprintln!(
-        "DEBUG:   Paper type      : MediaType={} -> PAPERTYPE={}",
-        quote_untrusted(&header.media_type),
-        spl::pjl_paper_type(&header.media_type).unwrap_or(spl::PJL_PAPERTYPE_DEFAULT)
-    );
-    eprintln!("DEBUG: --------------------------------------------------");
 }
 
 #[cfg(test)]
@@ -438,8 +216,12 @@ mod tests {
     // the reason the split has to be behaviour preserving rather than merely
     // compiling.
     use spl2_core::geometry::*;
-    use spl2_core::qpdl::{Algo0x11, SplDuplex, SplResolution};
-    use spl2_core::raster::CupsRasterVersion;
+    // The engine's own types, imported here rather than at the top of the file:
+    // the front end that survives P11 does not name them, and the test module
+    // does. See the `replay` module for where the loop went.
+    use spl2_core::qpdl::{self as spl, Algo0x11, SplDuplex, SplResolution};
+    use spl2_core::raster::{CupsRasterVersion, PageHeader};
+    use spl2_core::replay::validate_page_header;
     use std::io::Cursor;
 
     /// Represents an argument-less (direct pipeline) invocation.

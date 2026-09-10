@@ -55,9 +55,11 @@ License: GPL-2
  record. It is likewise not installed by this package and is kept as project
  data.
  .
- crates/spl2-core/src/raster.rs and src/golden.rs are NOT derived from SpliX:
- raster.rs implements the CUPS Raster container format, and golden.rs is this
- project's own test harness. Each mentions SpliX once, as a cross-reference
+ crates/spl2-core/src/raster.rs, crates/spl2-core/src/replay.rs and
+ crates/spl2-core/tests/golden.rs are NOT derived from SpliX: raster.rs
+ implements the CUPS Raster container format, replay.rs is the 1.x filter's own
+ page loop, moved out of src/main.rs so the corpus outlives that binary, and
+ golden.rs is this project's own test harness. Each mentions SpliX once, as a cross-reference
  rather than as transcribed material.
 Comment: The upstream notice was transcribed from the SpliX 2.0.1 source
  (Debian source package splix 2.0.1-1, from http://splix.ap2c.org/). Every

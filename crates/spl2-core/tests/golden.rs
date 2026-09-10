@@ -1,6 +1,7 @@
+#![cfg(feature = "golden-replay")]
 //! # Golden-file harness
 //!
-//! This module freezes the SPL2/QPDL bytes the 1.x CUPS filter PRODUCES,
+//! This harness freezes the SPL2/QPDL bytes the 1.x CUPS filter PRODUCES,
 //! before the code moves to a PAPPL Printer Application. The acceptance
 //! criterion for that migration is byte-for-byte identity (project rule 6);
 //! that criterion needs a reference to compare against, and the reference can
@@ -31,7 +32,7 @@
 //! ## Refreshing
 //!
 //! ```text
-//! UPDATE_GOLDENS=1 cargo test -p rastertospl-rust golden
+//! UPDATE_GOLDENS=1 cargo test -p spl2-core --features golden-replay --test golden
 //! ```
 //!
 //! Goldens may ONLY be refreshed together with a deliberate behaviour change;
@@ -48,7 +49,7 @@ use spl2_core::geometry::{
 use spl2_core::qpdl::{current_service_date, SplPaperSize, SplPaperSource};
 use spl2_core::raster::{CupsRasterVersion, PageHeader};
 
-use crate::{process_with_margin, CupsFilterArgs};
+use spl2_core::replay::{process_with_margin, JobIdentity};
 
 /// The FIXED service date written into the goldens.
 ///
@@ -663,18 +664,14 @@ fn build_sidecar(case: &Case) -> String {
 // ============================================================================
 
 fn goldens_dir() -> PathBuf {
-    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/goldens"))
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../goldens"))
 }
 
 /// Runs the case through the filter and returns the SPL stream it produced.
 fn run_case(case: &Case) -> Vec<u8> {
-    let args = CupsFilterArgs {
-        job_id: Some("1".to_string()),
-        user: Some(GOLDEN_USER.to_string()),
+    let identity = JobIdentity {
         title: Some(case.title.to_string()),
-        num_copies: None,
-        options: None,
-        filename: None,
+        user: Some(GOLDEN_USER.to_string()),
     };
 
     let raster = build_raster(case);
@@ -682,11 +679,12 @@ fn run_case(case: &Case) -> Vec<u8> {
 
     let mut out: Vec<u8> = Vec::new();
     process_with_margin(
-        &args,
+        &identity,
         Box::new(Cursor::new(raster)),
         &mut out,
         GOLDEN_SERVICE_DATE,
         case.media.imageable_pt.0,
+        &spl2_core::log::NoLog,
     )
     .unwrap_or_else(|e| panic!("golden case '{}' failed to process: {}", case.name, e));
     out
@@ -706,7 +704,7 @@ fn update_requested() -> bool {
 /// two produce the same bytes:
 ///
 /// ```text
-/// DUMP_GOLDEN_RASTER=/tmp/r cargo test -p rastertospl-rust golden
+/// DUMP_GOLDEN_RASTER=/tmp/r cargo test -p spl2-core --features golden-replay --test golden
 /// ./target/release/rastertospl-rust 1 tester golden 1 '' /tmp/r/a4-600-marks.raster > /tmp/out.spl
 /// ```
 ///
@@ -735,7 +733,7 @@ fn compare_or_update(path: PathBuf, produced: &[u8], case_name: &str) {
 
     let expected = fs::read(&path).unwrap_or_else(|e| {
         panic!(
-            "could not read golden file: {} ({}). To produce it the first time: UPDATE_GOLDENS=1 cargo test -p rastertospl-rust golden",
+            "could not read golden file: {} ({}). To produce it the first time: UPDATE_GOLDENS=1 cargo test -p spl2-core --features golden-replay --test golden",
             path.display(),
             e
         )
@@ -774,7 +772,7 @@ fn compare_or_update(path: PathBuf, produced: &[u8], case_name: &str) {
          produced   : {}\n\
          \n\
          The bytes going to the printer changed. If this is a DELIBERATE\n\
-         behaviour change, refresh with `UPDATE_GOLDENS=1 cargo test -p rastertospl-rust golden`\n\
+         behaviour change, refresh with `UPDATE_GOLDENS=1 cargo test -p spl2-core --features golden-replay --test golden`\n\
          and include the diff in review; otherwise it is a regression.",
         case_name,
         path.display(),
@@ -871,12 +869,12 @@ fn test_golden_geometry_matches_measured_cupsfilter_output() {
 fn test_golden_media_matches_ppd() {
     let ppd = fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/ppd/samsung-ml2160.ppd"
+        "/../../ppd/samsung-ml2160.ppd"
     ))
     .expect("could not read the PPD");
 
     for media in PPD_MEDIA.iter().copied() {
-        assert_eq!(media.imageable_pt.0, crate::media::HARD_MARGIN_PT);
+        assert_eq!(media.imageable_pt.0, spl2_core::media::HARD_MARGIN_PT);
         let dim_line = format!("*PaperDimension {}/", media.ppd_key);
         let dim = ppd
             .lines()

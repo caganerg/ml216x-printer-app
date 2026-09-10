@@ -42,3 +42,5 @@ pub mod qpdl;
 
 #[cfg(feature = "golden-replay")]
 pub mod raster;
+#[cfg(feature = "golden-replay")]
+pub mod replay;

@@ -29,7 +29,7 @@ the rules below exist because of that one fact.
 ## The bless discipline
 
 `goldens/` holds 32 frozen SPL2 streams and their sidecars.
-`cargo test -p rastertospl-rust golden` compares against them; `UPDATE_GOLDENS=1 cargo test -p rastertospl-rust golden`
+`cargo test -p spl2-core --features golden-replay --test golden` compares against them; `UPDATE_GOLDENS=1 cargo test -p spl2-core --features golden-replay --test golden`
 overwrites them. **Refreshing — "blessing" — a golden is a reviewed act, never
 a way to make a red build green.**
 
@@ -39,7 +39,7 @@ The rule:
   a regression until proven otherwise.
 * Refresh only together with a deliberate behaviour change, in the **same
   commit**, and describe in the commit message which bytes moved and why.
-* Include the diff in review. `src/golden.rs` prints the first differing
+* Include the diff in review. `crates/spl2-core/tests/golden.rs` prints the first differing
   offset and the surrounding bytes precisely so a reviewer can see what
   changed without reading 28 KB of hex.
 * Never refresh to silence an unexplained failure, and never loosen the
