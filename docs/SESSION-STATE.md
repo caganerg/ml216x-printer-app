@@ -1,6 +1,6 @@
 # Session State — PAPPL migration
 
-*Updated 2026-09-07.*
+*Updated 2026-09-10.*
 
 **The application now runs entirely in user space (2.0.0~alpha-4,
 decision Q-18).** The package installs a systemd *user* unit, enables it with
@@ -21,8 +21,9 @@ variable gets a warning rather than a silent exposure. S-4 is contained, not
 fixed: the socket's mode is still libpappl's, and the upstream half belongs
 with the S-1/S-2 bug report.
 
-The packaging change itself is **not yet installed or tested on a machine**;
-`sh -n`, a package build, and running the binary by hand are all that has been
+The packaging change was **installed and exercised on the maintainer's machine
+on 2026-09-10**; see "First install on real hardware" below. Before that date
+`sh -n`, a package build, and running the binary by hand were all that had been
 done.
 
 **The Debian package is now `ml216x-printer-app` (2.0.0~alpha-5)**, renamed
@@ -246,6 +247,12 @@ response, all three checked on 2026-09-07 against CUPS 2.4.10-3+deb13u2.
    which the PPD does not carry either (it records
    `MFG:Samsung;MDL:ML-2160 Series;CMD:SPL,FWV,EXT;` and nothing about USB).
    Socket transport, by contrast, is proven end to end.
+
+   **Partly answered 2026-09-10** by the first install on the maintainer's
+   machine — the duplicate queues were diagnosed and the hotplug rule appears
+   to hold — but the USB ID the device reports and the IEEE-1284 device ID
+   were both left uncaptured, so this item stays open. See "First install on
+   real hardware" below.
 2. ~~**Packaging for the printer application**~~ — **done**, and the USB
    permission story is now answered rather than pending: the maintainer
    supplied `04e8:330f`, so the packaged udev rule tags that one device
@@ -359,9 +366,78 @@ Two things the work turned up:
   resolutions and my expectation (raise it to the archive's 1.85), not acted
   on.
 
+**The `harnesses` job was red from its first run until 2026-09-10** and the
+reason was a real defect, not a flaky job: `probes` runs each harness twice and
+the second run inherited the first one's printers. Q-15 had made *probe mode*
+stateless, but every harness that needs the real SPL2 driver ran with state
+persistence on, isolated only by each script's scoped `XDG_CONFIG_HOME` — and
+PAPPL consults that variable only for a non-root server. CI's container runs as
+root, where the state file is `/var/lib/<base name>.state` and every run shares
+it. The save callback is now installed for any run with `--probe-output`
+(`8f8bc8d`, Q-15 amended); all five jobs are green as of that commit.
+
+The FFI crates were also relicensed from `Apache-2.0 OR MIT` to `MIT` on the
+same day (`fcfa5c8`, Q-8a superseded): under an `OR` dual licence a consumer
+may always elect MIT, so the Apache arm guaranteed nothing while costing a
+second licence text, a `debian/copyright` stanza and a longer SPDX string on
+fourteen files. `spl2-core`, `ml216x-printer-app` and the 1.x filter stay
+`GPL-2.0-only`, which SpliX forces.
+
 What CI cannot cover is listed in [`docs/CI.md`](CI.md); the short list is
 G-1's physical measurement, everything USB, executing the maintainer scripts,
-and installing or upgrading the `.deb`.
+and installing or upgrading the `.deb` — the last of which happened by hand on
+2026-09-10, below.
+
+## First install on real hardware, 2026-09-10
+
+The `.deb` left the development machine for the first time. What follows is
+what the maintainer reported from their own system, kept separate from what
+this repository can verify on its own.
+
+**The install itself worked, on Debian testing rather than trixie.** Q-7 says
+the package targets trixie and expects forky and sid to work unchanged because
+they carry the same `libpappl` 1.3.1-2.1; that expectation is now met once in
+practice rather than only on paper. `apt install ./…` resolved the
+dependencies, and no dependency line had to be relaxed.
+
+**Three things went wrong for the user, and none of them were defects in this
+code. All three are now documented in the README** (`8b8879a`, `11eec3d`,
+`15909b3`, `de1b645`):
+
+1. **`add` before the service was running.** `devices` needs no server and
+   succeeded, so the first command tried worked and the second failed — with
+   `Unable to start server: No such file or directory`, which names neither the
+   server nor the file. It is PAPPL trying to start a server for the client: it
+   `posix_spawn`s the path it was invoked with, and a bare name found through
+   `PATH` is not a path, so the file it cannot find is this binary.
+   Reproduced here exactly, by invoking through `PATH` with no server running;
+   invoking the same binary by absolute path starts a server and succeeds. The
+   installed service is enabled for every user, so a **new login** starts it;
+   an already-open session has to be told once. A code-level fix — hand PAPPL
+   this process's own absolute path — was offered and is **not** implemented.
+2. **No CUPS queue appeared.** The README claimed CUPS "discovers it over
+   DNS-SD", which holds only where `avahi-daemon` runs *and* something browses
+   for it, historically `cups-browsed`, which Debian 13 does not install by
+   default. The documented path is now the explicit
+   `lpadmin -p … -v ipp://127.0.0.1:8631/ipp/print/… -m everywhere`.
+3. **Three queues instead of one.** Two sources, and the second was identified
+   from its name alone: `cups-browsed` had discovered, over DNS-SD, the queue
+   this machine advertises itself, and named its copy `ML2160_thinkcentre` —
+   the queue's own name plus the host name, which is what it does when the
+   plain name is taken. The README now recommends disabling `cups-browsed`,
+   with what that costs and how to reverse it.
+
+**The duplicate-queue udev rule of alpha-3 appears to work**: the maintainer
+reports that plugging the printer in and out no longer adds a queue. This is
+the acceptance run that "Next work — the rest of P7" item 1 has been waiting
+for, but it is **not yet the complete evidence** that item asks for: the USB
+ID the device actually reports was not captured, and the packaged rule matches
+`04e8:330f` only, so a machine whose printer reports something else would see
+the queues return. The IEEE-1284 device ID is still uncollected. Item 1 stays
+open on those two points rather than closing here.
+
+**Still not evidence about paper.** Nothing above is a printed page. G-1 is
+untouched by this section.
 
 ## Step numbering
 
