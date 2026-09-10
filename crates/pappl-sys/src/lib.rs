@@ -922,7 +922,10 @@ extern "C" {
     /// Setting this suppresses the mainloop's own state handling: the `server`
     /// subcommand installs a state file only `if (!system->save_cb)`
     /// (`pappl/mainloop-subcommands.c`), so a system that already has one
-    /// neither loads nor writes `$XDG_CONFIG_HOME/<base name>.state`.
+    /// neither loads nor writes the state file — `$XDG_CONFIG_HOME/<base
+    /// name>.state` for a non-root server, `/var/lib/<base name>.state` when
+    /// the server runs as root, which is why scoping `XDG_CONFIG_HOME` alone
+    /// does not isolate one run from the next.
     pub fn papplSystemSetSaveCallback(
         system: *mut pappl_system_t,
         cb: pappl_save_cb_t,

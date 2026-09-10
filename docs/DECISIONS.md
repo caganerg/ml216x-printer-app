@@ -514,6 +514,30 @@ by one is refused by the other at load — `driver_cb` already fails on an
 unknown driver name — rather than being adopted silently. Verified: a probe
 server writes no `.state` file, and an SPL2 server still writes one.
 
+**Amended 2026-09-10: the callback is installed for every run with
+`--probe-output`, not only for `--probe`.** The original condition left the
+harness runs that need the real SPL2 driver — `transport-probe.py`,
+`g1-probe.py`, `security-probe.py` and `p5-probe.py --spl` — persisting state
+like a shipped server, and the isolation they relied on instead was each
+script's scoped `XDG_CONFIG_HOME`. That scoping does not hold: PAPPL consults
+`XDG_CONFIG_HOME` only for a non-root server. As root it writes
+`/var/lib/<base name>.state`, which every run on the machine shares.
+
+Found by CI rather than by reading: the `harnesses` job runs in a
+`debian:trixie` container as root, and it had never been green. The plain
+`transport-probe.py` run added a printer named `sock`, the state file recorded
+it under `/var/lib`, the next run — `--inject truncate` — reloaded it at
+startup, and its own `add` failed with `Printer name 'sock' already exists`.
+The harness was reporting a real leak between runs, not a defect in the change
+under test. `libpappl.so.1` carries the four candidate paths as literals:
+`SNAP_COMMON`, `/var/lib/%s.state`, `%s/%s.state` for `XDG_CONFIG_HOME`, and
+`%s/.config/%s.state`.
+
+A shipped server never passes `--probe-output`; it is a development flag, and
+the printers a user adds are still persisted exactly as before. What changes is
+that no run driving a file destination can inherit — or leave behind — a
+printer, whatever the uid and whatever the environment.
+
 ---
 
 ## 2026-09-06 — Q-16 (DECIDED): the SPL2 driver advertises the geometry probe's format

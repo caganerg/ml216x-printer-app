@@ -22,7 +22,10 @@ has never gone red is not evidence.
 Requires: cargo build -p ml216x-printer-app, cc, libcups2-dev, ipptool.
 The server is always stopped, XDG_CONFIG_HOME is scoped to a temporary
 directory so the user's own PAPPL state is untouched, and every byte stays in
-that directory.
+that directory. The scoping is belt and braces: a run with `--probe-output`
+persists no state at all (Q-15), which is what keeps two runs of this script
+independent when PAPPL ignores XDG_CONFIG_HOME — as it does for a root server,
+where the state file is `/var/lib/<base name>.state`.
 """
 import argparse
 import json

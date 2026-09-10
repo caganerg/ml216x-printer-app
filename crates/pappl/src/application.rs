@@ -450,15 +450,27 @@ unsafe extern "C" fn system_cb(
             if !sys::papplSystemAddListeners(raw, c"127.0.0.1".as_ptr()) {
                 return Err(error("could not bind the loopback listener"));
             }
-            // Q-15: a probe run persists nothing. PAPPL's mainloop otherwise
-            // saves printers to `$XDG_CONFIG_HOME/<base name>.state` and
-            // re-creates them at the next startup, which was observed handing a
-            // printer created under the geometry probe to the SPL2 driver —
-            // the probe's `file:///` guard is only checked when the printer is
-            // created, not when it is reloaded. Installing a save callback
-            // suppresses the mainloop's state handling entirely, because it
-            // only installs its own `if (!system->save_cb)`.
-            if app.probe {
+            // Q-15: a harness run persists nothing. PAPPL's mainloop otherwise
+            // saves printers to `<base name>.state` and re-creates them at the
+            // next startup, which was observed handing a printer created under
+            // the geometry probe to the SPL2 driver — the probe's `file:///`
+            // guard is only checked when the printer is created, not when it is
+            // reloaded. Installing a save callback suppresses the mainloop's
+            // state handling entirely, because it only installs its own
+            // `if (!system->save_cb)`.
+            //
+            // The condition is `probe_output`, not `probe`: every development
+            // run writes to a file destination, and one harness run must not
+            // inherit the printers of the last. Scoping `XDG_CONFIG_HOME`, as
+            // each script under `scripts/` does, is not enough, because PAPPL
+            // consults it only for a non-root server — as root it writes
+            // `/var/lib/<base name>.state` and every run shares it. That is
+            // what turned CI's `harnesses` job red: `transport-probe.py
+            // --inject truncate` reloaded the `sock` printer the plain run had
+            // added and failed with "Printer name 'sock' already exists".
+            // A shipped server never passes `--probe-output`, so its state is
+            // persisted as before.
+            if app.probe || app.probe_output.is_some() {
                 sys::papplSystemSetSaveCallback(raw, Some(discard_state), ptr::null_mut());
             }
             // A file destination is how both drivers are exercised without
@@ -502,11 +514,11 @@ unsafe extern "C" fn system_cb(
     }
 }
 
-/// Probe mode's save callback: succeeds without writing anything.
+/// A harness run's save callback: succeeds without writing anything.
 ///
 /// PAPPL calls this whenever the system changes. Reporting success is correct
-/// here — nothing failed, there is simply nowhere a probe run's state should
-/// go. See Q-15 and the call site in `system_cb`.
+/// here — nothing failed, there is simply nowhere a run driving a file
+/// destination should leave state. See Q-15 and the call site in `system_cb`.
 unsafe extern "C" fn discard_state(_system: *mut sys::pappl_system_t, _data: *mut c_void) -> bool {
     unsafe { guard(ptr::null_mut(), false, || Ok(true)) }
 }
