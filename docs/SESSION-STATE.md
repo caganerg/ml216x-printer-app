@@ -315,13 +315,53 @@ are decided and implemented. Hardware printing and CUPS sharing are now
 reported working by the maintainer; a device-scoped udev fix for confirmed USB ID `04e8:330f` is packaged in
 alpha-3; its reconnect/power-cycle hardware acceptance test remains open.
 
-Checks: `cargo test --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
-`cargo fmt --all --check`, golden checksums, all three `p5-probe.py` modes
-(default, `--spl`, `--device-failure`), `transport-probe.py` both plain and
-with `--inject truncate` / `--inject flip`, and `g1-probe.py --all` plus its
-three injections (`shift`, `crop`, `scale`). Every script scopes
-`XDG_CONFIG_HOME` to a temporary directory; run them no other way, or a probe
-run leaves printers in the user's own PAPPL state.
+Checks: **`./scripts/run-checks.sh`**, which is the whole list in one place and
+is what CI runs — `fmt`, `clippy` with `-D warnings`, `cargo test --workspace`,
+the `golden-replay` feature both ways, the golden checksums, all three
+`p5-probe.py` modes with the default mode's output diffed against
+`docs/P5-MEASUREMENTS.json`, `transport-probe.py` plain and with both
+injections, `g1-probe.py --all` plus its three injections, `security-probe.py`,
+and the `.deb` build. `--list` explains the groups, `--self-test` proves the
+runner still stops at the first failure. Every probe scopes `XDG_CONFIG_HOME`
+and `TMPDIR` to a temporary directory; run them no other way, or a probe run
+leaves printers in the user's own PAPPL state.
+
+## CI, added 2026-09-10
+
+Until this point there was no CI at all, while `CONTRIBUTING.md` and
+`docs/GOLDEN-VALIDATION.md` both spoke of "keeping the corpus in CI" and of CI
+building `golden-replay` both ways. The gap had already cost something: three
+clippy lints that did not exist when the engine was written turn the documented
+`-D warnings` run red on rustc 1.95, and that was found by typing the command,
+not by a machine. The lints are fixed in `fb7aab7` with no output bytes moved.
+
+`scripts/run-checks.sh` now holds the check list, and
+`.github/workflows/checks.yml` runs that same script in a `debian:trixie`
+container — trixie's packaged rustc 1.85.0 against libpappl 1.3.1-2.1+b2, the
+combination decision Q-1/D-1 targets. Three jobs gate (`build-and-test`,
+`harnesses`, `package`); two deliberately do not (`security-signal`, because
+its failure most likely means libpappl was *fixed*, and `future-toolchain`,
+because a newer stable's new lint is not a regression in this tree). It also
+runs weekly, since both of those signals arrive without a commit. Full local
+run from an empty `target/`: 2 m 52 s, all eight groups green.
+
+Two things the work turned up:
+
+* **The runner shipped with a defect that a mutation caught.** Calling each
+  group as `run_$g || fail $g` loses `set -e` inside the function body, so a
+  failure in the middle of a group was ignored. A mutated
+  `docs/P5-MEASUREMENTS.json` passed the run. Groups are now called plainly and
+  `--self-test` exercises the loop with a group that fails in the middle; the
+  self-test itself was shown red against the old runner and green against the
+  new one. `docs/CI.md` records the whole sequence.
+* **Q-22 is open.** Three crates declare `rust-version = "1.77"` and nothing
+  has ever compiled against it. Written up in `docs/DECISIONS.md` with
+  resolutions and my expectation (raise it to the archive's 1.85), not acted
+  on.
+
+What CI cannot cover is listed in [`docs/CI.md`](CI.md); the short list is
+G-1's physical measurement, everything USB, executing the maintainer scripts,
+and installing or upgrading the `.deb`.
 
 ## Step numbering
 

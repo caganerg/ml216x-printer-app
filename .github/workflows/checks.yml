@@ -1,0 +1,133 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Every job here runs `scripts/run-checks.sh`, which is also what a
+# contributor runs locally, so the enforced check list and the documented one
+# cannot drift apart. What each group covers, and what none of them cover, is
+# in docs/CI.md; the short version is that release gate G-1 is a measurement
+# on paper and no job below can take it.
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # Two of the signals here arrive without anyone pushing a commit: Debian
+  # patching libpappl (which retires a row in the security review) and a new
+  # clippy lint on a newer toolchain (which is how the rustc 1.95 lints went
+  # unnoticed until they were typed by hand). Monday morning, UTC.
+  schedule:
+    - cron: "17 5 * * 1"
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Decision Q-1/D-1: the target is the libpappl Debian trixie ships, 1.3.1,
+  # dynamically linked. So the container is trixie and the toolchain is the
+  # archive's rustc, not a rustup one — the same combination the .deb is built
+  # with. `future-toolchain` below covers the newer-compiler direction.
+  build-and-test:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Install the target toolchain and libraries
+        run: |
+          set -eux
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cargo git libcups2-dev libpappl-dev \
+            pkg-config python3 rust-clippy rustc rustfmt
+          rustc --version
+          pkg-config --modversion pappl
+      - uses: actions/checkout@v4
+      # The runner before the checks: a group whose middle command fails must
+      # abort the run. It did not, for one afternoon; see docs/CI.md.
+      - run: ./scripts/run-checks.sh --self-test
+      - run: ./scripts/run-checks.sh fmt clippy test features goldens
+
+  # The hardware-free harnesses, including every injection: a harness that has
+  # never been shown to go red is not evidence, and running the injections on
+  # every push is how that stays true rather than being a one-off claim in a
+  # document.
+  harnesses:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Install the target toolchain and libraries
+        run: |
+          set -eux
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cargo cups-ipp-utils git libcups2-dev \
+            libpappl-dev pkg-config python3 rustc
+      - uses: actions/checkout@v4
+      - run: ./scripts/run-checks.sh probes
+
+  package:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Install the target toolchain and libraries
+        run: |
+          set -eux
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cargo dpkg git libcups2-dev libpappl-dev \
+            pkg-config rustc
+      - uses: actions/checkout@v4
+      - run: ./scripts/run-checks.sh deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  # Deliberately not gating. This job reproduces the two unpatched libpappl
+  # overflows (S-1 and S-2 in docs/SECURITY-REVIEW.md) by crashing the server,
+  # and it fails when they stop reproducing — most likely because libpappl was
+  # fixed. That is news about the archive, not a defect in the change under
+  # test, so it must not block an unrelated pull request. A red run here means
+  # go and retire the matching review row.
+  security-signal:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    continue-on-error: true
+    steps:
+      - name: Install the target toolchain and libraries
+        run: |
+          set -eux
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cargo cups-ipp-utils git libcups2-dev \
+            libpappl-dev pkg-config python3 rustc
+      - uses: actions/checkout@v4
+      - run: ./scripts/run-checks.sh security
+
+  # Also deliberately not gating, and for the opposite reason: it exists to
+  # make compiler drift visible early. Three clippy lints that did not exist
+  # when the engine was written turned `-D warnings` red on rustc 1.95, and
+  # nothing announced it. A newer toolchain's new lint is not a regression in
+  # this tree, so it warns rather than blocks — but it warns before the next
+  # Debian rustc makes it blocking.
+  future-toolchain:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    continue-on-error: true
+    steps:
+      - name: Install libraries and the current stable Rust
+        run: |
+          set -eux
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential ca-certificates curl git libcups2-dev libpappl-dev pkg-config python3
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --profile minimal --default-toolchain stable \
+              --component clippy --component rustfmt
+          . "$HOME/.cargo/env"
+          rustc --version
+      - uses: actions/checkout@v4
+      - run: |
+          . "$HOME/.cargo/env"
+          ./scripts/run-checks.sh fmt clippy test features

@@ -1,5 +1,7 @@
 # ml216x-printer-app
 
+[![checks](https://github.com/caganerg/ml216x-printer-app/actions/workflows/checks.yml/badge.svg)](https://github.com/caganerg/ml216x-printer-app/actions/workflows/checks.yml)
+
 A PAPPL Printer Application for the Samsung ML-2160, ML-2165, ML-2165W and
 ML-2168 protocol family. It accepts jobs over IPP and emits SPL2/QPDL through
 PAPPL device transports, and it runs entirely in user space: a systemd user
@@ -11,7 +13,9 @@ hardware-confirmed `04e8:330f` device to prevent duplicate legacy queues;
 see [hardware test notes](docs/HARDWARE-TESTING.md).
 
 This is a development alpha. The selected **12.5 pt (4.41 mm)** margins still
-need hardware measurement (G-1), including vertical placement (Q-13).
+need hardware measurement (G-1), including vertical placement (Q-13). **A green
+badge above does not mean the margins are right**: every check is software, and
+what it cannot cover is listed in [docs/CI.md](docs/CI.md).
 The [P9 security review](docs/SECURITY-REVIEW.md) reproduced two memory
 corruption bugs in the tested libpappl dependency. Loopback binding limits
 network exposure but does not fix these bugs. See the

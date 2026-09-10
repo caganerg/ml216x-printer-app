@@ -14,9 +14,50 @@ answered. **Q-7 exists and is decided:** it asked whether the .deb should link
 libpappl statically or dynamically, and it is answered under Q-7 below (and
 folded into Q-1, which settled the same matter). Counting the decided entries
 as ten and treating Q-7 as unaccounted for is the arithmetic slip this note
-exists to prevent. **Q-12 through Q-21** were added later, by review and by
+exists to prevent. **Q-12 through Q-22** were added later, by review and by
 implementation rather than by the migration plan, and are the only entries
 outside the Q-1..Q-11 range.
+
+---
+
+## 2026-09-10 — Q-22 (OPEN): three crates promise rustc 1.77 and nothing checks it
+
+Raised while building CI. `crates/pappl-sys`, `crates/pappl` and
+`crates/ml216x-printer-app` each declare `rust-version = "1.77"`. Nothing in
+the tree has ever compiled against 1.77: the development host carries rustup
+1.95.0 and Debian trixie's packaged toolchain is 1.85.0, and those are the two
+that have been run. So the field is a promise with no evidence behind it, and
+the usual reason to pick 1.77 is visible in the code — `offset_of!`, which the
+layout test needs, stabilised there.
+
+An unverified compatibility claim is the kind of thing this project treats as
+an exposure rather than as "probably fine", which is why it is written up
+instead of quietly deleted or quietly raised. What the answer changes is
+concrete: it decides whether CI grows a job that installs an old toolchain.
+
+Candidate resolutions:
+
+* **(a) Verify it.** Add a CI job that installs 1.77.0 through rustup and runs
+  `cargo build --workspace` (not the tests — a test-only lint or dev feature
+  from a newer edition would fail for reasons the promise does not cover).
+  Cost: a rustup download per run, in a job whose whole purpose is a
+  compatibility claim nobody has asked for yet.
+* **(b) Raise the field to 1.85 and say why.** The package is built by
+  Debian's toolchain against Debian's libpappl (decision Q-1/D-1); 1.85 is
+  what trixie ships and what the `.deb` is actually compiled with. This makes
+  the declared minimum equal to the tested minimum, and CI's gating job proves
+  it on every push at no extra cost. It narrows what a downstream on an older
+  Rust may do, which for a driver that must match a specific libpappl is not
+  much of a loss.
+* **(c) Drop `rust-version` entirely.** Honest about there being no promise,
+  but it also removes the only place a reader can see which Rust this tree
+  expects, and cargo's error for a too-old compiler becomes a type error deep
+  in a macro rather than a clear version message.
+
+**My expectation: (b).** The tested toolchain and the declared one should be
+the same toolchain, and for this project the tested one is the archive's. If
+the maintainer wants the 1.77 promise kept, (a) is the only way to keep it
+honestly, and it should be a scheduled job rather than a per-push one.
 
 ---
 

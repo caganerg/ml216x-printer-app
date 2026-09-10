@@ -69,6 +69,13 @@ DENSITY=3` leaves all 106 other tests green. That is the case for keeping the
 corpus in CI rather than relying on unit tests, and it is why `CONTRIBUTING.md`
 makes refreshing a golden a reviewed act rather than a build step.
 
+**That CI exists as of 2026-09-10**, which it did not when the sentence above
+was written: `.github/workflows/checks.yml` runs the corpus through the `test`
+group of `scripts/run-checks.sh` on every push, and the `goldens` group
+verifies `goldens/SHA256SUMS` besides, so a blessed corpus cannot drift from
+its recorded checksums. What CI still cannot do is measure paper; see
+[`docs/CI.md`](CI.md).
+
 **Re-run against the enlarged corpus (32 cases).** All five defects are still
 caught, and the number of tests catching each is unchanged — 6, 4, 4, 2 and 1
 respectively. That is expected rather than disappointing: all 32 cases live

@@ -17,8 +17,9 @@ the rules below exist because of that one fact.
    description of any FFI change.
 3. **Small, reviewable commits.** Do not refactor unrelated code in a change
    that also alters behaviour.
-4. `cargo clippy --workspace --all-targets -- -D warnings` and `cargo fmt --all --check` must
-   pass.
+4. `./scripts/run-checks.sh` must pass — that script *is* the check list,
+   including `cargo clippy --workspace --all-targets -- -D warnings` and
+   `cargo fmt --all --check`. See "Checks" below.
 5. **No `unwrap()`, `expect()` or `panic!()` on any path reachable from a C
    callback.** Unwinding across `extern "C"` is undefined behaviour. Callbacks
    go through the `catch_unwind` shim in the `pappl` wrapper crate.
@@ -77,6 +78,42 @@ English for all code, comments, identifiers, commit messages, documentation
 and packaging metadata (decision Q-11). This is a GPL project and contributors
 will not read Turkish; user-facing localisation, if it ever happens, belongs in
 a translation layer, never inlined into source.
+
+## Checks
+
+Run them the way CI does, because it is the same script:
+
+```sh
+./scripts/run-checks.sh            # every group; about 3 minutes from a clean target/
+./scripts/run-checks.sh --list     # the groups and what each covers
+./scripts/run-checks.sh --self-test    # prove the runner still stops at the first failure
+./scripts/run-checks.sh test probes
+```
+
+The groups are `fmt`, `clippy`, `test`, `features`, `goldens`, `probes`,
+`security` and `deb`. None of them needs a printer: the probe groups drive the
+real printer application over loopback and to `file://` devices, and each one
+scopes `XDG_CONFIG_HOME` and `TMPDIR` into a temporary directory, so a run
+never leaves printers in your own PAPPL state.
+
+Two things worth knowing before you read a red run:
+
+* The harnesses run their own **injections** on every push — a truncated
+  socket stream, a flipped bit, a shifted page, a cropped page, a rescaled
+  page. Each injection *must be detected*; those cases pass when the harness
+  catches the defect it planted. A red injection means the harness stopped
+  working, not that the printer did.
+* The `security` group fails when the two libpappl overflows stop
+  reproducing, which most likely means libpappl was **fixed**. That job does
+  not gate anything. See `docs/CI.md`.
+* Do not make the runner call a group as `run_$g || something`. A shell
+  function on the left of `||` loses `set -e` for its whole body, so a failure
+  in the middle of a group is ignored — this script shipped with exactly that
+  defect and a mutation caught it. `--self-test` is there to catch it again.
+
+**A green run says nothing about where toner lands on paper.** That is release
+gate G-1, it is a measurement with a ruler, and it is still open; see
+`docs/G1-MEASUREMENT.md`. `docs/CI.md` lists everything else CI cannot cover.
 
 ## Licensing
 
