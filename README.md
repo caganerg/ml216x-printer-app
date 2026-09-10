@@ -228,15 +228,31 @@ through a different path than the one this project tests.
   machine is called. A queue named `<your queue>_<your hostname>` is this and
   nothing else.
 
-  Turning it off loses nothing here — its job is to surface printers *other*
-  machines share, and this one is attached to yours. Debian 13 no longer
-  installs it by default, so a running one is usually left over from an
-  earlier release.
+  **This project recommends turning `cups-browsed` off.** Debian 13 does not
+  install it by default, so on a fresh system there is nothing to do and no
+  duplicate appears; a running one is usually left over from an upgrade.
 
   ```sh
-  systemctl status cups-browsed          # inactive or not-found is fine
-  sudo systemctl disable --now cups-browsed   # only if it keeps making copies
+  systemctl status cups-browsed               # inactive or not-found: nothing to do
+  sudo systemctl disable --now cups-browsed   # recommended if it is running
+  sudo lpadmin -x ML2160_thinkcentre          # then delete the copy it made
   ```
+
+  What that costs, stated plainly so the recommendation can be judged: nothing
+  for USB, which `cups-browsed` has no part in — a printer plugged into this
+  machine is found by udev and by CUPS' own `usb` backend, both untouched. What
+  it does is make printers *other* machines share appear in your list by
+  themselves. Without it they are still discoverable; you add them from the
+  "Add Printer" dialog rather than finding them already there. Reverse it at any
+  time with `sudo systemctl enable --now cups-browsed`.
+
+  Keeping the copy is not dangerous, but it buys nothing and it can mislead.
+  It may not even work: this server binds the loopback address only, so a copy
+  reached through the machine's host name rather than `127.0.0.1` is a queue
+  that accepts jobs and cannot deliver them. It can also take the system
+  default, which sends jobs down a path this project does not test — and while
+  release gate G-1 is open, a page whose queue is in doubt is a measurement
+  wasted. Check with `lpstat -v` and delete it.
 
 Remove the extras and keep the IPP one. Queue names are yours; check the URI
 rather than the name, and delete only those pointing at `usb://…`:
