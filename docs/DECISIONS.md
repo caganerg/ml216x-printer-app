@@ -345,9 +345,11 @@ rather than a remote one; a non-loopback bind must wait on a patched libpappl.
 `scripts/security-probe.py` reproduces both and asserts the crash, so the
 findings retire themselves when the library is fixed.
 
-**Still to do:** file the Debian bug against `src:pappl` citing the two commits
-and the confirmed 1.3.1 lines, and record its number in the review and the
-README. It needs a bug-tracker submission and is left for the maintainer.
+**Still to do:** send the Debian bug against `src:pappl`. The report itself was
+written on 2026-09-10 and is `docs/DEBIAN-BUG-DRAFT.md`, citing the two commits
+and the confirmed 1.3.1 lines; submitting it needs a bug-tracker account and
+stays with the maintainer, and its number then goes into the review and the
+README.
 
 ---
 

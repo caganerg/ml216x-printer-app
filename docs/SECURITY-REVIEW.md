@@ -194,10 +194,14 @@ Tracking the Q-1 follow-up's four agreed actions:
 3. **Loopback-only listener — already the case.** `application.rs` binds
    `127.0.0.1`. A non-loopback bind is a deliberate future opt-in and must wait
    on a patched libpappl.
-4. **File the Debian bug and record the number here.** Still to do: file
-   against `src:pappl` citing `4587888f50` and `44327aaac3` and the confirmed
-   1.3.1 lines above, and add the bug number to this document and the README.
-   This needs a bug-tracker submission and is left for the maintainer.
+4. **File the Debian bug and record the number here.** **Drafted 2026-09-10;
+   not yet submitted.** The full text is `docs/DEBIAN-BUG-DRAFT.md` — against
+   `src:pappl` 1.3.1-2.1, severity grave, tagged security/upstream, citing
+   `4587888f50` and `44327aaac3` and the confirmed 1.3.1 lines above, with both
+   reproductions and the exposure argument. What is left is the send itself,
+   which needs a bug-tracker submission and stays with the maintainer. **When
+   it is sent, put the bug number here and in `README.md`** — until then this
+   item is open, and the draft says so on its first line.
 5. ~~**Decide S-4.**~~ **Done.** Q-19 was decided by delegation and
    implemented in 2.0.0~alpha-4; see S-4 above for what it does and does not
    cover. What is left is the upstream half — a libpappl that creates its
