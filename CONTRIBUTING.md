@@ -98,6 +98,13 @@ never leaves printers in your own PAPPL state.
 
 Two things worth knowing before you read a red run:
 
+* `scripts/server-probe.py` has no injection flag of its own; the previous
+  releases are the injection. `--application dist/<older binary>` drives the
+  same checks against 2.0.0~alpha-5 or 2.0.0~alpha-6 and both go red, which is
+  what earns the green run. Two of its checks print `KNOWN` rather than
+  failing when the environment decides the outcome — a machine with no system
+  D-Bus socket, or no `avahi-browse`; see S-6 and S-7 in
+  `docs/SECURITY-REVIEW.md`.
 * The harnesses run their own **injections** on every push — a truncated
   socket stream, a flipped bit, a shifted page, a cropped page, a rescaled
   page. Each injection *must be detected*; those cases pass when the harness

@@ -1,6 +1,6 @@
 # Session State — PAPPL migration
 
-*Updated 2026-09-10.*
+*Updated 2026-09-12.*
 
 **The application now runs entirely in user space (2.0.0~alpha-4,
 decision Q-18).** The package installs a systemd *user* unit, enables it with
@@ -438,6 +438,67 @@ open on those two points rather than closing here.
 
 **Still not evidence about paper.** Nothing above is a printed page. G-1 is
 untouched by this section.
+
+## Two crashes fixed, 2026-09-12 (2.0.0~alpha-7)
+
+Reported by the maintainer against 2.0.0~alpha-6, from their own machine:
+`ml216x-printer-app devices` aborted with `Unable to initialize DNS-SD: Daemon
+not running` and an assertion inside libavahi. Both crashes below were
+reproduced here before anything was changed, and the release that fixes them
+carries the harness that keeps them fixed.
+
+**The reported one (Q-24).** Q-23 declined the DNS-SD announcement by pointing
+`DBUS_SYSTEM_BUS_ADDRESS` at a path that does not exist. That stops
+`avahi_client_new`, which was the intent, and it also makes
+`_papplDNSSDInit` return null to the code that *looks* for printers, which
+`pappl/device-network.c:459` hands to `avahi_service_browser_new` without
+checking. `devices` exited 134. The same listing runs inside the server for
+the web interface's "Add Printer" page, so opening it killed the print server
+— not noticed when Q-23 was measured, because that measurement asked the
+network what was advertised and never asked the application to list anything.
+
+Q-24 replaces the mechanism with the condition PAPPL itself checks: a printer
+with no DNS-SD name is never advertised. Clearing the name has to happen
+between the state file being read and `papplSystemRun` registering, and the
+mainloop leaves no hook there, so **this application now loads and saves its
+own state file** — the mainloop stands aside for a system that already has a
+save callback. `crates/ml216x-printer-app/src/state.rs` computes the path as a
+transcription of `_papplMainloopRunServer`, because getting it wrong loses an
+existing installation's printers; ten unit tests and the probe's
+add-restart-expect cycle cover that. The driver list is now registered in the
+system callback as well, before the load, since restoring a printer asks the
+driver callback for its capabilities.
+
+**The one found while measuring it (Q-25).** Every page of the web interface
+segfaulted the server, including `http://localhost:8631/`, which the README
+recommends. `papplClientHTMLFooter` resolves the footer through the
+localisation table before testing it, and `papplLocGetString` hands a null key
+to `strcmp`. The application passed `ptr::null()` for footer HTML; it now
+passes a string. This shipped in alpha-5 and alpha-6, so the web interface has
+never worked in the 2.0 line.
+
+**New harness:** `scripts/server-probe.py`, in the `probes` group. It fetches
+every page and asserts the server is still running, then restarts a server
+with a printer in state and asserts that the printer came back and that no
+DNS-SD registration was even attempted. It has no `--inject` flag because the
+previous releases are the injection: `--application dist/…` against the
+alpha-5 and alpha-6 binaries fails on the first page with the server dead of
+SIGSEGV and on the registration those releases still ask for. Two of its
+checks print `KNOWN` instead of failing where the environment decides the
+outcome — see S-6 and S-7.
+
+**Three new libpappl findings**, S-5 (null footer dereference), S-6 (null
+DNS-SD client asserted on) and S-7 (Avahi lock kept after a failed browse), in
+`docs/SECURITY-REVIEW.md`, with a second Debian bug report drafted in
+`docs/DEBIAN-BUG-DRAFT.md`. None is fixed here; what changed is that this
+application no longer walks into them. S-5 is the one a local account could
+use to stop the print server at will, with a GET and no authentication.
+
+**One gap left open on purpose.** A printer added through the web interface's
+own "Add Printer" form is advertised until the next restart: PAPPL registers
+it there explicitly, after the event Q-24 cannot use. Documented in the README
+and in Q-24; closing it would need an upstream fix or a thread racing PAPPL
+for a lock.
 
 ## Step numbering
 

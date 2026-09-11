@@ -546,6 +546,12 @@ pub type pappl_save_cb_t =
     Option<unsafe extern "C" fn(system: *mut pappl_system_t, data: *mut c_void) -> bool>;
 
 /// ```c
+/// typedef void (*pappl_printer_cb_t)(pappl_printer_t *printer, void *data);
+/// ```
+pub type pappl_printer_cb_t =
+    Option<unsafe extern "C" fn(printer: *mut pappl_printer_t, data: *mut c_void)>;
+
+/// ```c
 /// typedef const char *(*pappl_pr_autoadd_cb_t)(const char *device_info, const char *device_uri, const char *device_id, void *data);
 /// ```
 pub type pappl_pr_autoadd_cb_t = Option<
@@ -932,6 +938,32 @@ extern "C" {
         data: *mut c_void,
     );
 
+    /// ```c
+    /// extern void papplSystemIteratePrinters(pappl_system_t *system, pappl_printer_cb_t cb, void *data);
+    /// ```
+    ///
+    /// The callback runs with the system's read lock held, so it must not call
+    /// anything that takes the system's write lock. `papplPrinterSetDNSSDName`
+    /// is safe here: it takes the *printer's* lock and then only signals the
+    /// system through `_papplSystemConfigChanged`, which uses the separate
+    /// config mutex.
+    pub fn papplSystemIteratePrinters(
+        system: *mut pappl_system_t,
+        cb: pappl_printer_cb_t,
+        data: *mut c_void,
+    );
+
+    /// ```c
+    /// extern void papplSystemSetDNSSDName(pappl_system_t *system, const char *value);
+    /// ```
+    ///
+    /// `NULL` clears the name, and `papplSystemRun` advertises the system's
+    /// own `_ipps-system._tcp` service only `if (system->dns_sd_name)`
+    /// (`pappl/system.c`), so a cleared name is never registered. It says
+    /// nothing about the printers: each carries its own name and is registered
+    /// from the same loop (decision Q-24).
+    pub fn papplSystemSetDNSSDName(system: *mut pappl_system_t, value: *const c_char);
+
     // ---- printer.h -------------------------------------------------------
 
     /// ```c
@@ -950,6 +982,20 @@ extern "C" {
     /// extern void papplPrinterDelete(pappl_printer_t *printer);
     /// ```
     pub fn papplPrinterDelete(printer: *mut pappl_printer_t);
+
+    /// ```c
+    /// extern void papplPrinterSetDNSSDName(pappl_printer_t *printer, const char *value);
+    /// ```
+    ///
+    /// `NULL` stops the printer being advertised, which is how decision Q-24
+    /// declines the announcement this loopback-only server cannot honour.
+    /// Beware the caller's context: this takes the printer's **write** lock,
+    /// and PAPPL raises `PAPPL_EVENT_PRINTER_CREATED` while holding that same
+    /// lock for reading (`papplSystemAddEvent` in
+    /// `pappl/system-subscription.c`), so calling it from an event callback
+    /// deadlocks the thread that created the printer. Q-24 calls it from the
+    /// system callback instead, where no PAPPL lock is held.
+    pub fn papplPrinterSetDNSSDName(printer: *mut pappl_printer_t, value: *const c_char);
 
     /// ```c
     /// extern bool papplPrinterSetDriverData(pappl_printer_t *printer, pappl_pr_driver_data_t *data, ipp_t *attrs);

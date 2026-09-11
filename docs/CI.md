@@ -32,10 +32,10 @@ contributor can reproduce a red run exactly.
 |---|---|---|
 | `fmt` | `cargo fmt --all --check` | — |
 | `clippy` | `cargo clippy --workspace --all-targets -- -D warnings` | — |
-| `test` | `cargo test --workspace` — 152 tests, the golden corpus among them | The corpus is the only thing that catches a PJL reordering (`docs/GOLDEN-VALIDATION.md` §2) |
+| `test` | `cargo test --workspace` — 163 tests, the golden corpus among them | The corpus is the only thing that catches a PJL reordering (`docs/GOLDEN-VALIDATION.md` §2) |
 | `features` | `spl2-core` built with **and** without `golden-replay`, plus the `qpdl-decode` example | Decision Q-6 put the CUPS raster parser behind a non-default feature precisely so it stays out of the shipping path; only a no-feature build proves it did |
 | `goldens` | `sha256sum -c goldens/SHA256SUMS` | A blessed corpus must not drift from its recorded checksums; the bless discipline depends on the checksums being real |
-| `probes` | `p5-probe` (3 modes, and its output **diffed against the committed `docs/P5-MEASUREMENTS.json`**), `transport-probe` plain and both injections, `g1-probe --all` (44 cases) and all three injections | These drive the real application over loopback; they are the only checks that exercise PAPPL itself |
+| `probes` | `p5-probe` (3 modes, and its output **diffed against the committed `docs/P5-MEASUREMENTS.json`**), `transport-probe` plain and both injections, `server-probe` (every web page, and a printer restored from state without being advertised), `g1-probe --all` (44 cases) and all three injections | These drive the real application over loopback; they are the only checks that exercise PAPPL itself |
 | `security` | `security-probe.py` — reproduces the two libpappl 1.3.1 overflows | Its failure is news about the archive, not about this tree; see below |
 | `deb` | `sh -n` over the maintainer scripts, then `scripts/build-deb.sh` | The hand-built package path never substitutes `${shlibs:Depends}`, so the packaging has to be built to be believed |
 
@@ -113,6 +113,17 @@ covered by any amount of green:
 
 A harness that has never gone red is not evidence, so each claim above was
 made to fail. Two kinds of proof:
+
+`server-probe.py` has no `--inject` flag; the previous releases are the
+injection. `--application dist/...` drives the same checks against the
+2.0.0~alpha-5 and 2.0.0~alpha-6 binaries, and both go red on the first page
+with the server dead of SIGSEGV and on the DNS-SD registration the restarted
+server still asks for. Two of its checks are conditional on the environment
+and print `KNOWN` rather than failing when they cannot run: the "Add Printer"
+page is not fetched where there is no system D-Bus socket, because PAPPL
+aborts on a null DNS-SD client while listing devices, and `avahi-browse` is
+only consulted where it is installed. Both are upstream defects this tree
+cannot fix; they are S-6 and S-7 in `docs/DEBIAN-BUG-DRAFT.md`.
 
 **Injections, which run on every push.** They are part of the `probes` and
 `security` groups rather than a one-off experiment, so they keep proving

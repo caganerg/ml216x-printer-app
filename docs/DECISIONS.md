@@ -14,7 +14,7 @@ answered. **Q-7 exists and is decided:** it asked whether the .deb should link
 libpappl statically or dynamically, and it is answered under Q-7 below (and
 folded into Q-1, which settled the same matter). Counting the decided entries
 as ten and treating Q-7 as unaccounted for is the arithmetic slip this note
-exists to prevent. **Q-12 through Q-22** were added later, by review and by
+exists to prevent. **Q-12 through Q-25** were added later, by review and by
 implementation rather than by the migration plan, and are the only entries
 outside the Q-1..Q-11 range.
 
@@ -460,7 +460,18 @@ catch.
 
 ---
 
-## 2026-09-10 — Q-23 (DECIDED): the server does not announce itself over DNS-SD
+## 2026-09-10 — Q-23 (SUPERSEDED by Q-24): the server does not announce itself over DNS-SD
+
+**The decision stands; the mechanism below does not.** Declining the
+announcement is still right, for every reason this entry gives, and Q-24
+carries it out a different way. What is recorded here and must not be tried
+again is the mechanism: cutting the process off from D-Bus also cuts off the
+code that *looks* for printers, and PAPPL hands its DNS-SD library a null
+client there rather than checking. The `devices` sub-command aborted, and so
+did the running server the first time anyone opened the web interface's "Add
+Printer" page. The rest of this entry is left as written, because the four
+rejected ways to decline and the measurement method are what Q-24 was built
+on.
 
 **Decision: the printer application declines DNS-SD, by pointing
 `DBUS_SYSTEM_BUS_ADDRESS` at a path that does not exist before PAPPL starts.**
@@ -532,6 +543,155 @@ left untouched, on the same principle as Q-19's `TMPDIR`.
 address has no way to say "do not publish me", and that is a gap in PAPPL
 rather than in this project. A feature request belongs with the S-1/S-2 report
 in `docs/SECURITY-REVIEW.md` that is still owed to Debian.
+
+---
+
+## 2026-09-12 — Q-24 (DECIDED): the application owns its state file, so it can clear every DNS-SD name
+
+**Decision: this application loads and saves PAPPL's state file itself, and
+between the load and the run it clears the DNS-SD name of the system and of
+every printer that came out of the file. Q-23's `deny_dnssd` is deleted.**
+Implemented in `crates/ml216x-printer-app/src/state.rs` (which path, and which
+runs qualify) and in `crates/pappl/src/application.rs` (the load, the
+clearing and the save callback).
+
+**Raised by the maintainer, from their own machine, against 2.0.0~alpha-6:**
+
+```
+$ ml216x-printer-app devices
+Unable to initialize DNS-SD: Daemon not running
+ml216x-printer-app: browser.c:581: avahi_service_browser_new: Assertion `client' failed.
+İptal edildi
+```
+
+**What Q-23's mechanism actually did.** Pointing `DBUS_SYSTEM_BUS_ADDRESS` at
+a path that does not exist makes `avahi_client_new` fail, which is what
+stopped the announcement — and it also makes `_papplDNSSDInit` return null to
+everything else. `pappl/device-network.c:459` passes that null straight into
+`avahi_service_browser_new`, which asserts on it, so the process dies of
+`SIGABRT`. Reproduced here: `devices` exits 134. The same listing runs inside
+the **server**, because the web interface's "Add Printer" page lists devices
+(`pappl/system-webif.c:512`), so opening `http://localhost:8631/addprinter`
+killed the print server outright. Neither was noticed when Q-23 was measured,
+because the measurement asked the network what was advertised and never asked
+the application to list anything.
+
+**The new mechanism is PAPPL's own vocabulary.** `papplSystemRun` advertises a
+printer only `if (printer->dns_sd_name)`, and the system's own service only
+`if (system->dns_sd_name)`. A cleared name is therefore never registered — not
+"registered and failed", never attempted — and nothing about D-Bus, Avahi or
+device listing is disturbed.
+
+**Why that means owning the state file.** The names have to be cleared after
+the state file is read and before `papplSystemRun` reaches its registration
+loop, and PAPPL's mainloop leaves no hook between the two: it loads the file
+itself, after the system callback has returned. What it does offer is an
+opt-out — it installs a state file only `if (!system->save_cb)`, the same
+property Q-15 uses to make a harness run persist nothing. So the load moves
+into the system callback, followed by `papplSystemSetDNSSDName(system, NULL)`,
+`papplSystemIteratePrinters` with `papplPrinterSetDNSSDName(printer, NULL)`,
+and `papplSystemSaveState` installed on the same path. The driver list has to
+be registered in the callback too, before the load: restoring a printer runs
+`papplPrinterCreate`, which asks the driver callback for its capabilities, and
+a printer restored before the list exists would be refused — that is how this
+decision could have silently eaten a user's queue, and it is why the probe
+asserts the printer is still there after a restart.
+
+`papplPrinterSetDNSSDName` is the API Q-23 rejected as deadlocking, and the
+rejection was right about the context, not about the call: PAPPL raises
+`PAPPL_EVENT_PRINTER_CREATED` from `papplSystemAddEvent`, which takes the
+printer's lock for reading, and the setter takes it for writing. In the system
+callback no PAPPL lock is held at all.
+
+**The path is now this project's responsibility**, and getting it wrong loses
+the printers of an existing installation. `state_file` is a transcription of
+`_papplMainloopRunServer`, branch for branch, including the treatment of a
+variable that is set but unusable — an empty `XDG_CONFIG_HOME` reaches the
+temporary directory rather than falling through to `HOME`, because in C the
+test is only whether the variable is present. Ten unit tests cover it, and
+`scripts/server-probe.py` adds an end-to-end one a unit test cannot: a printer
+added, the server restarted, and the printer expected back.
+
+**Measured, with a control.**
+
+* *Control, the same code with nothing declining the announcement* (the
+  `DBUS_SYSTEM_BUS_ADDRESS` of Q-23 pointed at the real bus instead):
+  `avahi-browse` on this machine reports the printer on `enp1s0` at
+  `debian.local:8732`, with `rp=ipp/print/measureq`, `ty=Samsung ML-216x
+  Series` and an `adminurl` — the queue Q-23 exists to prevent.
+* *With Q-24*: the restarted server's log contains no `Registering DNS-SD
+  name` line at all, `avahi-browse` reports nothing, the printer added before
+  the restart is listed by `printers`, `devices` exits 0, and `/`,
+  `/addprinter`, `/config` and the printer's own pages are all served with the
+  server still running.
+
+**A gap, stated rather than papered over.** A printer added through the web
+interface's own "Add Printer" **form** is advertised for the rest of that
+server's life: PAPPL registers it there explicitly
+(`_papplSystemWebAddPrinter`), after the event this decision cannot use. The
+next start clears it. The `add` sub-command, which `README.md` documents, does
+not go that way. Closing it would need either an upstream fix or a background
+thread racing PAPPL for the printer's lock, and a race is not a mechanism.
+
+**A quiet consequence worth knowing.** The `DNSSDName` line stays in the state
+file. `_papplSystemConfigChanged` counts a change only while the system is
+running, and the clearing happens before it runs, so nothing triggers a save
+— this decision never rewrites the user's file by itself, and the name is
+cleared again at every start.
+
+**The log lines Q-23 told people to expect are gone.** `Unable to initialize
+DNS-SD: Daemon not running` no longer appears, because nothing is denied any
+more; `README.md` no longer explains it away.
+
+**Upstream.** The null DNS-SD client is a defect in PAPPL whatever this
+application does with D-Bus: any machine without a reachable system bus — a
+container, a minimal server — kills a PAPPL printer application through that
+page. It is S-6 in `docs/DEBIAN-BUG-DRAFT.md`, together with S-7, the Avahi
+lock PAPPL keeps holding when a browse fails, which hangs the second view of
+that page.
+
+---
+
+## 2026-09-12 — Q-25 (DECIDED): the server passes PAPPL a footer, because a null one is fatal
+
+**Decision: `papplMainloop` is given a footer string.** One argument, in
+`crates/pappl/src/application.rs`, changed from `ptr::null()` to
+`c"ml216x-printer-app"`.
+
+**Found while measuring Q-24, not reported.** Every page of the web interface
+killed the server:
+
+```
+papplLocGetString → cupsArrayFind → strcmp
+papplClientHTMLFooter
+_papplSystemWebAddPrinter
+_papplClientProcessHTTP
+```
+
+`papplClientHTMLFooter` passes the system's footer HTML through
+`papplClientGetLocString` before deciding whether there is one, and
+`papplLocGetString` hands the key it is given to the array comparison, which
+calls `strcmp` on it. A null footer is therefore dereferenced, not skipped.
+The server segfaults **after** the status line and most of the page have been
+written, so the browser shows a truncated page and the print server is simply
+gone.
+
+**Reproduced against 1.3.1-2.1+b2 on `/`, `/addprinter` and `/config`**, with
+`avahi-daemon` running and with it unreachable, and against both binaries in
+`dist/` — so this shipped in 2.0.0~alpha-5 and 2.0.0~alpha-6. `README.md` has
+been telling people to open `http://localhost:8631/` the whole time. Any local
+account could do it; the port is loopback-only (Q-18), so the reach is the
+machine, not the network.
+
+**With a footer the lookup finds a string and returns it**, the page is
+finished, and the server stays up: nine pages fetched in a row, twice for the
+one that lists devices, with the process still running. That is
+`scripts/server-probe.py`'s first property, and it goes red against either
+older binary.
+
+**Upstream.** S-5 in `docs/DEBIAN-BUG-DRAFT.md`. The one-line guard is
+`if (!key) return (key);` in `papplLocGetString`, or not calling the lookup on
+a footer that does not exist.
 
 ---
 

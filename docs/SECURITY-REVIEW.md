@@ -18,6 +18,9 @@ temporary directory, so nothing touched the developer's own state.
 | S-2 | libpappl `printer-ipp.c` | stack overflow on oversized `media-ready` | yes, over IPP | no |
 | S-3 | our systemd unit | the service ran as root | n/a | yes — fixed in 2.0.0~alpha-4 (Q-18) |
 | S-4 | libpappl control socket | mode 0777, any local user may drive the server | not in the shipped configuration | contained in 2.0.0~alpha-4 (Q-19) |
+| S-5 | libpappl `client-webif.c` + `loc.c` | a null footer is dereferenced on every web page | yes, over HTTP — it killed the server | avoided in 2.0.0~alpha-7 (Q-25) |
+| S-6 | libpappl `device-network.c` | a null DNS-SD client is asserted on while listing devices | yes, wherever D-Bus is unreachable | no — 2.0.0~alpha-7 stopped provoking it (Q-24) |
+| S-7 | libpappl `device-network.c` | the Avahi lock is kept after a failed browse | yes, wherever DNS-SD browsing fails | no |
 
 S-1 and S-2 are the two unpatched upstream fixes the Q-1 follow-up flagged
 (`4587888f50` and `44327aaac3`). Both are **confirmed present in 1.3.1** and
@@ -179,6 +182,115 @@ print a warning saying so. And it is a local workaround for a libpappl default
 that would be better fixed upstream, which is candidate (d) in Q-19 and is not
 this project's to schedule.
 
+## S-5 — a null footer is dereferenced on every web page (AVOIDED in 2.0.0~alpha-7)
+
+Found while measuring Q-24, by fetching the pages rather than by reading code.
+Every page of the web interface killed the server:
+
+```
+papplLocGetString → cupsArrayFind → strcmp
+papplClientHTMLFooter
+_papplSystemWebAddPrinter
+_papplClientProcessHTTP
+```
+
+`papplClientHTMLFooter` (`pappl/client-webif.c`) resolves the footer before it
+checks whether there is one:
+
+```c
+const char *footer = papplClientGetLocString(client, papplSystemGetFooterHTML(...));
+if (footer) { ... }
+```
+
+and `papplLocGetString` (`pappl/loc.c`) puts the key straight into the array
+lookup — `search.key = (char *)key; cupsArrayFind(loc->pairs, &search)` —
+whose comparison calls `strcmp`. An application that set no footer HTML has
+`papplSystemGetFooterHTML` return `NULL`, so the lookup dereferences it. The
+early return in `papplLocGetString` covers a null *loc*, not a null key.
+
+The crash lands after the status line and most of the body have been written,
+so the client sees a truncated page and the print server is gone.
+
+Reproduced on `/`, `/addprinter`, `/config` and a printer's own pages against
+`1.3.1-2.1+b2`, with `avahi-daemon` running and with it unreachable, and
+against both binaries in `dist/` — so 2.0.0~alpha-5 and 2.0.0~alpha-6 both
+shipped with it, while `README.md` recommended opening
+`http://localhost:8631/`. Reach is local: the port is loopback-only (Q-18),
+and the web interface has no authentication service configured, so any local
+account could stop the print server at will, repeatedly.
+
+**Avoided by decision Q-25**, which passes a footer string, so the lookup has
+a key and returns it. The defect is libpappl's and is unchanged; an
+application that passes no footer still crashes.
+`scripts/server-probe.py` fetches every page and asserts the server is still
+running, which is what keeps this from coming back.
+
+## S-6 — a null DNS-SD client is asserted on while listing devices (NOT FIXED)
+
+`pappl/device-network.c:459` passes the result of `_papplDNSSDInit(NULL)`
+straight into `avahi_service_browser_new`:
+
+```c
+if ((pdl_ref = avahi_service_browser_new(_papplDNSSDInit(NULL), ...)) == NULL)
+```
+
+`_papplDNSSDInit` returns `NULL` when `avahi_client_new` fails, which happens
+whenever the D-Bus system bus cannot be reached at all — a container without
+`dbus`, a minimal server, or a process whose `DBUS_SYSTEM_BUS_ADDRESS` points
+somewhere unusable. `avahi_service_browser_new` asserts on the client, so the
+process dies:
+
+```
+Unable to initialize DNS-SD: Daemon not running
+ml216x-printer-app: browser.c:581: avahi_service_browser_new: Assertion `client' failed.
+```
+
+The null is checked one line later, on the browser rather than on the client,
+which is the whole defect. Note that a *stopped* `avahi-daemon` does not
+trigger it: with the bus reachable, `AVAHI_CLIENT_NO_FAIL` returns a client in
+the connecting state and the browse then fails cleanly. It is the unreachable
+bus that is fatal.
+
+Reachable two ways in a printer application: the `devices` sub-command, and
+the web interface's "Add Printer" page, which lists devices
+(`pappl/system-webif.c:512`) — so a client that can open the HTTP port can
+kill the server on a machine with no system bus.
+
+**This project stopped provoking it in 2.0.0~alpha-7** (Q-24 replaced the
+mechanism that had made the bus unreachable on purpose), but the defect is
+untouched and this project cannot fix it: the page belongs to PAPPL.
+`scripts/server-probe.py` therefore skips that page where there is no system
+bus, and says so rather than failing.
+
+## S-7 — the Avahi lock is kept after a failed browse (NOT FIXED)
+
+The same function takes the DNS-SD lock before browsing and returns without
+releasing it when the browse fails:
+
+```c
+_papplDNSSDLock();
+...
+if ((pdl_ref = avahi_service_browser_new(...)) == NULL)
+{
+  _papplDeviceError(err_cb, err_data, "Unable to create service browser.");
+  cupsArrayDelete(devices);
+  return (ret);            // the lock is still held
+}
+_papplDNSSDUnlock();
+```
+
+`_papplDNSSDLock` is `avahi_threaded_poll_lock`, so the next DNS-SD operation
+in that process waits forever. Measured against a server whose browse could
+not work: the first view of "Add Printer" answered in 2.0 s, the second and
+third never completed and were cut off at 20 s. In a printer application that
+means one hung request and, with it, any later DNS-SD work in the process.
+
+Reachable wherever browsing fails while the client exists — the ordinary case
+of a machine with D-Bus but no running `avahi-daemon`. Not this project's to
+fix; `scripts/server-probe.py` reports it as a `KNOWN` finding rather than a
+failure, because a red check for an upstream defect that the environment
+decides is not a signal anyone can act on.
+
 ## Actions
 
 Tracking the Q-1 follow-up's four agreed actions:
@@ -194,8 +306,9 @@ Tracking the Q-1 follow-up's four agreed actions:
 3. **Loopback-only listener — already the case.** `application.rs` binds
    `127.0.0.1`. A non-loopback bind is a deliberate future opt-in and must wait
    on a patched libpappl.
-4. **File the Debian bug and record the number here.** **Drafted 2026-09-10;
-   not yet submitted.** The full text is `docs/DEBIAN-BUG-DRAFT.md` — against
+4. **File the Debian bug and record the number here.** **Drafted 2026-09-10,
+   extended 2026-09-12 with a second report for S-5, S-6 and S-7; not yet
+   submitted.** The full text is `docs/DEBIAN-BUG-DRAFT.md` — against
    `src:pappl` 1.3.1-2.1, severity grave, tagged security/upstream, citing
    `4587888f50` and `44327aaac3` and the confirmed 1.3.1 lines above, with both
    reproductions and the exposure argument. What is left is the send itself,
@@ -215,6 +328,9 @@ The scripts live under `scripts/` and are self-contained (loopback, scoped
 
 - `scripts/security-probe.py --case dither` reproduces S-1.
 - `scripts/security-probe.py --case ready-media` reproduces S-2.
+- `scripts/server-probe.py --application dist/<older binary>` reproduces S-5:
+  the run fails on the first page with the server dead of `SIGSEGV`. Against
+  this tree the same run passes, which is the regression test for Q-25.
 
 Both print the server's exit signal and assert on it, so they fail if a future
 libpappl fixes the bug — at which point the corresponding row above can be

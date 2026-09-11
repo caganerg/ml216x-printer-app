@@ -114,12 +114,16 @@ started from the package into a session that is already open, which is what
 the explicit `start` above is for.
 
 Once running it listens on the loopback address at port 8631. **It does not
-advertise itself over DNS-SD** (decision Q-23): a service announcement naming a
-port nothing off this machine can open is a promise it cannot keep, and it
-produced a second, undeletable queue on the desktop — see "Keep it to one
-queue". `Unable to initialize DNS-SD: Daemon not running`, twice, in the
-service log is that decision working, not a fault. Until you add a printer it
-does nothing else.
+advertise itself over DNS-SD** (decisions Q-23 and Q-24): a service
+announcement naming a port nothing off this machine can open is a promise it
+cannot keep, and it produced a second, undeletable queue on the desktop — see
+"Keep it to one queue". It declines by giving its printers no DNS-SD name at
+all, so the announcement is never attempted; nothing appears in the log about
+it. 2.0.0~alpha-6 did it another way and logged `Unable to initialize DNS-SD:
+Daemon not running` twice at every start — if you see that line, you are
+running that version, which should be replaced: it also crashed on
+`ml216x-printer-app devices` and on the web interface's "Add Printer" page.
+Until you add a printer the server does nothing else.
 
 Two consequences of running in your session are worth knowing before you rely
 on it:
@@ -228,8 +232,13 @@ through a different path than the one this project tests.
 
 * **Browsing.** Anything that discovers printers over DNS-SD makes a copy of
   what it finds. **Since 2.0.0~alpha-6 this application announces nothing**
-  (Q-23), so this source is closed at the root; the rest of this bullet applies
-  to a queue *CUPS* shares, and to versions before that.
+  (Q-23, and Q-24 for the way it does it now), so this source is closed at the
+  root; the rest of this bullet applies to a queue *CUPS* shares, and to
+  versions before that. One gap is worth knowing: a printer you add through
+  this application's **own web page** at `http://localhost:8631/`, rather than
+  with `ml216x-printer-app add`, is advertised until the service is next
+  restarted. PAPPL publishes it there itself, and the next start takes the
+  name away again.
 
   `cups-browsed`, if installed and running, creates its own copy
   of any queue it discovers over DNS-SD — including one advertised by

@@ -3,13 +3,14 @@
 #![forbid(unsafe_code)]
 
 use pappl::application::{Application, Capabilities, GeometryProbe, RasterDriver};
-use std::ffi::CString;
+use std::ffi::{CString, OsStr};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 
 mod driver;
 mod media_table;
 mod runtime;
+mod state;
 
 fn run() -> Result<i32, Box<dyn std::error::Error>> {
     // Before anything reads TMPDIR — `std::env::temp_dir` below included — and
@@ -17,11 +18,6 @@ fn run() -> Result<i32, Box<dyn std::error::Error>> {
     // its control socket in $TMPDIR at mode 0777, so leaving that at /tmp hands
     // every local account the server's whole control surface.
     runtime::confine();
-    // Also before any thread exists, and for the same kind of reason: Q-23
-    // declines the DNS-SD announcement PAPPL would otherwise make for every
-    // printer, which this loopback-only server cannot honour and which turns
-    // into a second, undeletable queue on the desktop.
-    runtime::deny_dnssd();
     let mut args = Vec::new();
     let mut probe = false;
     let mut probe_output = None;
@@ -66,6 +62,34 @@ fn run() -> Result<i32, Box<dyn std::error::Error>> {
             .any(|a| matches!(a.to_bytes(), b"server" | b"drivers" | b"--help"))
     {
         return Err("start the file destination explicitly with: [--probe] --probe-output /absolute/output server; submit using a second process and -u".into());
+    }
+    // Decision Q-24: a server takes PAPPL's state handling over, so that every
+    // printer restored from the file can be told not to advertise itself
+    // before the system starts. Only a `server` run may do that — `drivers`
+    // builds a system through the same callback, and a listing command must
+    // not rewrite the file a server owns — and a probe run persists nothing at
+    // all (Q-15), which is the same condition the discarding save callback
+    // uses. Where the path cannot be worked out the reason is printed and
+    // PAPPL keeps the job, which is exactly what it did before Q-24.
+    let mut state_file = None;
+    if !probe
+        && probe_output.is_none()
+        && state::subcommand(args.iter().map(|a| a.to_bytes())) == Some(b"server")
+    {
+        // `args[0]` is the program name as invoked, which is what PAPPL takes
+        // the base name of; it is present because the loop above pushed it.
+        match args
+            .first()
+            .ok_or_else(|| {
+                "this process was given no program name, so the state file PAPPL \
+                 would use cannot be named"
+                    .to_string()
+            })
+            .and_then(|program| state::path(OsStr::from_bytes(program.to_bytes())))
+        {
+            Ok(path) => state_file = Some(CString::new(path.as_os_str().as_bytes())?),
+            Err(reason) => eprintln!("ml216x-printer-app: warning: {reason}"),
+        }
     }
     if args.iter().any(|a| a.to_bytes() == b"--help") {
         println!("Development options: --probe --probe-output ABSOLUTE-PATH --listen-port PORT --spool-directory DIRECTORY");
@@ -139,6 +163,7 @@ fn run() -> Result<i32, Box<dyn std::error::Error>> {
         probe_output,
         port,
         spool_directory: CString::new(spool.as_os_str().as_bytes())?,
+        state_file,
     };
     app.run(&args).map_err(Into::into)
 }

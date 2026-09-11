@@ -47,14 +47,16 @@ Groups, in the order a full run uses:
 
   fmt       cargo fmt --all --check
   clippy    cargo clippy --workspace --all-targets -- -D warnings
-  test      cargo test --workspace (152 tests, includes the golden corpus)
+  test      cargo test --workspace (163 tests, includes the golden corpus)
   features  spl2-core built and tested both with and without `golden-replay`
             (decision Q-6), and the qpdl-decode example the G-1 harness uses
   goldens   sha256sum -c over goldens/SHA256SUMS, so a blessed corpus cannot
             drift from its recorded checksums
   probes    the hardware-free harnesses: p5-probe (3 modes, and its output
             diffed against the committed docs/P5-MEASUREMENTS.json),
-            transport-probe (plain plus both injections) and g1-probe --all
+            transport-probe (plain plus both injections), server-probe (every
+            web page served with the server still alive, and a printer
+            restored from state without being advertised) and g1-probe --all
             (44 cases, plus all three injections)
   security  security-probe.py — reproduces the two libpappl 1.3.1 overflows.
             A FAILURE here most likely means libpappl was fixed, which is the
@@ -217,6 +219,12 @@ run_probes() {
     python3 scripts/transport-probe.py --inject truncate
     say "probes: transport-probe --inject flip"
     python3 scripts/transport-probe.py --inject flip
+
+    say "probes: server-probe (every web page, and state without DNS-SD)"
+    # No injection flag: the two previous releases are the injection, and
+    # `--application` is how the script was shown to go red against them. See
+    # its docstring.
+    python3 scripts/server-probe.py
 
     say "probes: g1-probe --all (every medium and resolution)"
     python3 scripts/g1-probe.py --all
