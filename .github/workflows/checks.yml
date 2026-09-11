@@ -5,6 +5,16 @@
 # cannot drift apart. What each group covers, and what none of them cover, is
 # in docs/CI.md; the short version is that release gate G-1 is a measurement
 # on paper and no job below can take it.
+#
+# The two actions used below are pinned to their current major, v7. GitHub
+# deprecated the Node.js 20 runtime the v4 tags ran on and was forcing them
+# onto Node 24 anyway, with a warning on every run; `actions/checkout` moved
+# to Node 24 in v5 and `actions/upload-artifact` only in v6, so v7 is the
+# first major where both are current. Neither upgrade changes anything this
+# file asks for: checkout is used with no inputs, and the artifact step's
+# `name`, `path` and `if-no-files-found` are unchanged. v7 of checkout also
+# refuses to check a fork's pull request out under `pull_request_target` and
+# `workflow_run`, neither of which this workflow uses.
 name: checks
 
 on:
@@ -41,7 +51,7 @@ jobs:
             pkg-config python3 rust-clippy rustc rustfmt
           rustc --version
           pkg-config --modversion pappl
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # The runner before the checks: a group whose middle command fails must
       # abort the run. It did not, for one afternoon; see docs/CI.md.
       - run: ./scripts/run-checks.sh --self-test
@@ -62,7 +72,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential ca-certificates cargo cups-ipp-utils git libcups2-dev \
             libpappl-dev pkg-config python3 rustc
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: ./scripts/run-checks.sh probes
 
   package:
@@ -76,9 +86,9 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential ca-certificates cargo dpkg git libcups2-dev libpappl-dev \
             pkg-config rustc
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: ./scripts/run-checks.sh deb
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: deb
           path: dist/*.deb
@@ -102,7 +112,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
             build-essential ca-certificates cargo cups-ipp-utils git libcups2-dev \
             libpappl-dev pkg-config python3 rustc
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: ./scripts/run-checks.sh security
 
   # Also deliberately not gating, and for the opposite reason: it exists to
@@ -127,7 +137,7 @@ jobs:
               --component clippy --component rustfmt
           . "$HOME/.cargo/env"
           rustc --version
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: |
           . "$HOME/.cargo/env"
           ./scripts/run-checks.sh fmt clippy test features
