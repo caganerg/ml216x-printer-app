@@ -115,7 +115,12 @@ A harness that has never gone red is not evidence, so each claim above was
 made to fail. Two kinds of proof:
 
 `server-probe.py` has no `--inject` flag; the previous releases are the
-injection. `--application dist/...` drives the same checks against the
+injection. Note that the `harnesses` job runs as **root** in its container, so
+it exercises the branch where PAPPL keeps the state file in
+`/var/lib/<base name>.state` and ignores `XDG_CONFIG_HOME` — the probe expects
+the path for the uid it is running under, and asserts the server logged
+loading exactly that file. The first version of the probe assumed the scoped
+`XDG_CONFIG_HOME` and turned this job red for that reason alone. `--application dist/...` drives the same checks against the
 2.0.0~alpha-5 and 2.0.0~alpha-6 binaries, and both go red on the first page
 with the server dead of SIGSEGV and on the DNS-SD registration the restarted
 server still asks for. Two of its checks are conditional on the environment

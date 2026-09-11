@@ -40,14 +40,24 @@ upstream defect (S-6 in docs/DEBIAN-BUG-DRAFT.md) that this application cannot
 prevent, since the page is PAPPL's own. In an environment with no system bus
 the page is therefore not fetched, and the run says why.
 
+Where the state file goes is not this script's choice, and that is the point of
+checking it: the application computes the path PAPPL's mainloop used, so an
+ordinary user's run lands in the scoped XDG_CONFIG_HOME below and a **root**
+run lands in `/var/lib/<base name>.state`, because PAPPL ignores
+XDG_CONFIG_HOME as root. CI's container runs as root and therefore exercises
+that branch. An existing file there is copied to `<file>.probe-backup`, put
+back at the end, and this script's own file is removed — a backup left behind
+means the run was killed part way through, and the file beside it is the one
+to restore.
+
 Requires: cargo build -p ml216x-printer-app. Optional: avahi-browse.
-XDG_CONFIG_HOME and TMPDIR are scoped to a temporary directory, so the state
-file this script creates is its own and the developer's printers are never
-touched.
+XDG_CONFIG_HOME and TMPDIR are scoped to a temporary directory, so nothing
+else this script does can reach the developer's own PAPPL state.
 """
 import argparse
 import http.client
 import os
+import shutil
 import re
 import socket
 import subprocess
@@ -76,6 +86,20 @@ PAGES = [
 ]
 DEVICE_PAGE = "/addprinter"
 SYSTEM_BUS = "/run/dbus/system_bus_socket"
+
+
+def state_path(application, work):
+    """Where the application will keep its state file, by PAPPL's own rules.
+
+    Root keeps it in `/var/lib` and ignores XDG_CONFIG_HOME; everyone else
+    gets the directory this script scoped. Deliberately derived here rather
+    than read out of the server's log, so that the log line can be compared
+    against it: agreeing with PAPPL's mainloop is what keeps an upgrade from
+    losing a user's printers, and it is the one thing a unit test cannot check
+    end to end.
+    """
+    directory = Path("/var/lib") if os.geteuid() == 0 else work
+    return directory / f"{application.name}.state"
 
 
 def fetch(port, page, timeout):
@@ -186,97 +210,20 @@ def main():
         (work / "spool").mkdir(mode=0o700)
         first = (work / "first.log").open("w+")
         second = (work / "second.log").open("w+")
-
-        # Pass one exists to put a printer in the state file. Adding one over
-        # IPP does not advertise it — PAPPL registers a printer when a server
-        # starts with it already in state, which is why a restart is the only
-        # scenario that tests the decision.
-        server = start(args.application, args.port, work, first)
+        state = state_path(args.application, work)
+        # A root run shares `/var/lib` with whatever is installed there, so the
+        # run starts from no file of its own and puts back the one it found.
+        backup = state.with_name(state.name + ".probe-backup")
+        if state.exists():
+            shutil.copy2(state, backup)
+            state.unlink()
         try:
-            added = client(args.application, args.port, work, "add", "-d", PRINTER,
-                           "-m", "samsung_ml216x", "-v", "socket://127.0.0.1:9100")
-            if added.returncode != 0:
-                failures.append(f"the printer could not be added: {added.stderr.strip()}")
+            run(args, work, state, first, second, failures, known)
         finally:
-            stop(args.application, server, args.port, work)
-
-        state = work / f"{args.application.name}.state"
-        if not state.exists():
-            failures.append(
-                f"no state file at {state}: either nothing was saved or the path "
-                f"this application computes is not the one PAPPL's mainloop used, "
-                f"which loses the printers of an existing installation")
-
-        # Pass two is the one that matters: the printer is in the file when the
-        # server starts, so this is where PAPPL would advertise it.
-        server = start(args.application, args.port, work, second)
-        try:
-            listed = client(args.application, args.port, work, "printers")
-            if PRINTER not in listed.stdout:
-                failures.append(
-                    f"the printer did not survive the restart; `printers` said "
-                    f"{listed.stdout.strip()!r}")
-
-            registrations = [line for line in (work / "second.log").read_text().splitlines()
-                             if re.search(r"Registering DNS-SD name", line)]
-            if registrations:
-                # Not "was advertised": the log line is written before the
-                # attempt, so this catches a server that asked PAPPL to
-                # register and got away with it only because something else
-                # was broken. Q-24 is that the name is gone and the attempt is
-                # never made.
-                failures.append(
-                    f"the server asked PAPPL to register {len(registrations)} "
-                    f"DNS-SD service(s) for a printer restored from state, which "
-                    f"decision Q-24 declines: {registrations[0].strip()}")
-            on_the_network = advertised()
-            if on_the_network is None:
-                known.append("avahi-browse is not installed, so the network itself "
-                             "was not asked; the server's log was")
-            elif on_the_network:
-                failures.append(
-                    f"{len(on_the_network)} record(s) naming this server are on the "
-                    f"network: {on_the_network[0]}")
-            # The pages come last: one of them can end the process, and the
-            # question above is about what the server did when it started.
-            for page in PAGES:
-                status, reason = fetch(args.port, page, timeout=30)
-                gone = died(server)
-                if gone:
-                    failures.append(
-                        f"{page}: the server died of {gone} while serving it")
-                    break
-                if status != 200:
-                    failures.append(f"{page}: {reason or f'HTTP {status}'}")
-
-            if died(server) is None:
-                if not Path(SYSTEM_BUS).exists():
-                    known.append(
-                        f"{DEVICE_PAGE} was not fetched: there is no system bus at "
-                        f"{SYSTEM_BUS}, and PAPPL aborts on a null DNS-SD client "
-                        f"while listing devices (upstream S-6)")
-                else:
-                    for attempt in (1, 2):
-                        # Twice on purpose. PAPPL returns from a failed device
-                        # browse still holding the Avahi lock, so where browsing
-                        # cannot work the second view never completes (upstream
-                        # S-7). That is a hang, not a crash, and not ours to fix.
-                        status, reason = fetch(args.port, DEVICE_PAGE, timeout=40)
-                        gone = died(server)
-                        if gone:
-                            failures.append(
-                                f"{DEVICE_PAGE}: the server died of {gone} on view "
-                                f"{attempt}")
-                            break
-                        if status != 200:
-                            known.append(
-                                f"{DEVICE_PAGE} view {attempt}: "
-                                f"{reason or f'HTTP {status}'} — DNS-SD browsing is "
-                                f"failing in this environment (upstream S-7)")
-                            break
-
-        finally:
-            stop(args.application, server, args.port, work)
+            if state.exists():
+                state.unlink()
+            if backup.exists():
+                backup.replace(state)
 
     for note in known:
         print(f"KNOWN {note}")
@@ -284,6 +231,106 @@ def main():
         raise SystemExit("FAIL:\n  " + "\n  ".join(failures))
     print(f"PASS server: {len(PAGES)} page(s) served with the server still running, "
           f"a printer restored from state, and nothing advertised")
+
+
+def run(args, work, state, first, second, failures, known):
+    with_state = f"Loading system state from '{state}'"
+
+    # Pass one exists to put a printer in the state file. Adding one over
+    # IPP does not advertise it — PAPPL registers a printer when a server
+    # starts with it already in state, which is why a restart is the only
+    # scenario that tests the decision.
+    server = start(args.application, args.port, work, first)
+    try:
+        added = client(args.application, args.port, work, "add", "-d", PRINTER,
+                       "-m", "samsung_ml216x", "-v", "socket://127.0.0.1:9100")
+        if added.returncode != 0:
+            failures.append(f"the printer could not be added: {added.stderr.strip()}")
+    finally:
+        stop(args.application, server, args.port, work)
+
+    if not state.exists():
+        failures.append(
+            f"no state file at {state}: either nothing was saved or the path "
+            f"this application computes is not the one PAPPL's mainloop used, "
+            f"which loses the printers of an existing installation")
+
+    # Pass two is the one that matters: the printer is in the file when the
+    # server starts, so this is where PAPPL would advertise it.
+    server = start(args.application, args.port, work, second)
+    try:
+        listed = client(args.application, args.port, work, "printers")
+        if PRINTER not in listed.stdout:
+            failures.append(
+                f"the printer did not survive the restart; `printers` said "
+                f"{listed.stdout.strip()!r}")
+
+        if with_state not in (work / "second.log").read_text():
+            failures.append(
+                f"the restarted server did not report loading {state}; the path "
+                f"it computes has drifted from PAPPL's mainloop, which loses "
+                f"the printers of an existing installation")
+
+        registrations = [line for line in (work / "second.log").read_text().splitlines()
+                         if re.search(r"Registering DNS-SD name", line)]
+        if registrations:
+            # Not "was advertised": the log line is written before the
+            # attempt, so this catches a server that asked PAPPL to
+            # register and got away with it only because something else
+            # was broken. Q-24 is that the name is gone and the attempt is
+            # never made.
+            failures.append(
+                f"the server asked PAPPL to register {len(registrations)} "
+                f"DNS-SD service(s) for a printer restored from state, which "
+                f"decision Q-24 declines: {registrations[0].strip()}")
+        on_the_network = advertised()
+        if on_the_network is None:
+            known.append("avahi-browse is not installed, so the network itself "
+                         "was not asked; the server's log was")
+        elif on_the_network:
+            failures.append(
+                f"{len(on_the_network)} record(s) naming this server are on the "
+                f"network: {on_the_network[0]}")
+        # The pages come last: one of them can end the process, and the
+        # question above is about what the server did when it started.
+        for page in PAGES:
+            status, reason = fetch(args.port, page, timeout=30)
+            gone = died(server)
+            if gone:
+                failures.append(
+                    f"{page}: the server died of {gone} while serving it")
+                break
+            if status != 200:
+                failures.append(f"{page}: {reason or f'HTTP {status}'}")
+
+        if died(server) is None:
+            if not Path(SYSTEM_BUS).exists():
+                known.append(
+                    f"{DEVICE_PAGE} was not fetched: there is no system bus at "
+                    f"{SYSTEM_BUS}, and PAPPL aborts on a null DNS-SD client "
+                    f"while listing devices (upstream S-6)")
+            else:
+                for attempt in (1, 2):
+                    # Twice on purpose. PAPPL returns from a failed device
+                    # browse still holding the Avahi lock, so where browsing
+                    # cannot work the second view never completes (upstream
+                    # S-7). That is a hang, not a crash, and not ours to fix.
+                    status, reason = fetch(args.port, DEVICE_PAGE, timeout=40)
+                    gone = died(server)
+                    if gone:
+                        failures.append(
+                            f"{DEVICE_PAGE}: the server died of {gone} on view "
+                            f"{attempt}")
+                        break
+                    if status != 200:
+                        known.append(
+                            f"{DEVICE_PAGE} view {attempt}: "
+                            f"{reason or f'HTTP {status}'} — DNS-SD browsing is "
+                            f"failing in this environment (upstream S-7)")
+                        break
+
+    finally:
+        stop(args.application, server, args.port, work)
 
 
 main()

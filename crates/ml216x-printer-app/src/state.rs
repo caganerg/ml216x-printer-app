@@ -297,7 +297,7 @@ mod tests {
         assert_eq!(find(&["app", "--help", "server"]), None);
     }
 
-    fn env<'a>(base_name: &'a str, uid: u32) -> Environment<'a> {
+    fn env(base_name: &str, uid: u32) -> Environment<'_> {
         Environment {
             base_name: OsStr::new(base_name),
             uid,
