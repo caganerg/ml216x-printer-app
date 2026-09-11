@@ -1,3 +1,45 @@
+ml216x-printer-app (2.0.0~alpha-7) unstable; urgency=medium
+
+  * Fixes two crashes that 2.0.0~alpha-6 shipped. Both were reproduced here,
+    and both are in this release's regression harness
+    (scripts/server-probe.py), which was run against the alpha-5 and alpha-6
+    binaries to confirm it catches them.
+  * "ml216x-printer-app devices" no longer aborts. Reported by a user against
+    alpha-6: the command died with "Unable to initialize DNS-SD: Daemon not
+    running" followed by an assertion inside libavahi. Declining the DNS-SD
+    announcement in alpha-6 worked by making D-Bus unreachable for the whole
+    process, which also broke the code that *looks* for printers — libpappl
+    passes the resulting null client to Avahi without checking it. The same
+    listing runs inside the server for the web interface's "Add Printer" page,
+    so opening that page killed the print server outright.
+  * Every page of the web interface no longer kills the server. Opening
+    http://localhost:8631/ — which README.md recommends — segfaulted the
+    server on alpha-5 and alpha-6: libpappl looks up the footer HTML in its
+    translation table on every page and looks up a null rather than skipping
+    it. This release gives it a footer, so the lookup has something to find.
+  * The server is still not discoverable, and now says so by saying nothing
+    (decision Q-24). It gives its printers no DNS-SD name, which is the
+    condition libpappl itself checks before advertising, so no announcement is
+    attempted. The "Unable to initialize DNS-SD: Daemon not running" lines
+    alpha-6 asked you to expect are gone; if you still see them, you are still
+    running alpha-6.
+  * Consequence of the above, stated because it changes where printers are
+    kept from: the application now loads and saves its own state file, at the
+    path libpappl's mainloop was already using
+    (~/.config/ml216x-printer-app.state for a login session,
+    /var/lib/ml216x-printer-app.state for a root server). Printers added with
+    earlier versions are picked up unchanged; the upgrade needs nothing.
+  * One gap, documented rather than hidden: a printer added through the web
+    interface's own "Add Printer" form is advertised until the service is next
+    restarted, because libpappl publishes it there itself. Adding printers
+    with "ml216x-printer-app add", as README.md documents, is unaffected.
+  * The three libpappl defects behind all of this are written up in
+    docs/SECURITY-REVIEW.md as S-5, S-6 and S-7, with a second Debian bug
+    report drafted in docs/DEBIAN-BUG-DRAFT.md. None of them is fixed here;
+    what changes is that this application no longer walks into them.
+
+ -- Çağan ERGÜN <caganergun@tutanota.com>  Sat, 12 Sep 2026 00:20:00 +0300
+
 ml216x-printer-app (2.0.0~alpha-6) unstable; urgency=medium
 
   * The server no longer announces itself over DNS-SD (decision Q-23). It binds
