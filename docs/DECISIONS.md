@@ -1419,3 +1419,30 @@ prose to translate:
 * quotations in `docs/MIGRATION-PLAN.md` of strings that existed in the
   pre-migration tree, which are evidence of what that tree said and are not
   edited after the fact.
+
+
+## 2026-09-12 — Q-26 (DECIDED): standard PAPPL network discovery
+
+Requested by the maintainer: align discovery and direct network access with
+other PAPPL applications. This supersedes Q-18's loopback-only listener and
+Q-23/Q-24's DNS-SD suppression, not the user-service or socket permissions.
+
+Normal servers call the installed PAPPL 1.3.1 API
+`bool papplSystemAddListeners(pappl_system_t *system, const char *name)` with
+NULL, documented to bind IPv4/IPv6 any-address. File-output harnesses retain
+127.0.0.1. The application no longer clears DNS-SD names or owns a copy of
+PAPPL's state-path selection and command parser. PAPPL loads and saves the
+same existing state file. The footer crash workaround remains in place.
+
+A permanent CUPS queue and CUPS re-sharing are optional. An entry visible in
+`lpstat -e` but absent from `lpstat -p` is discovery, not evidence of a second
+persistent queue. Maintainer evidence showed cups-browsed inactive and a
+service on port 631: suppressing PAPPL advertisements could not remove that
+CUPS announcement. No system-wide discovery settings are changed.
+
+Remote administration is still disabled and TLS is still disabled. The known
+libpappl raster defects are now network-reachable; deployment should restrict
+port 8631 to trusted clients. This change does not fix those dependency bugs.
+The server probe verifies persistence, wildcard listening and registration;
+resolved mDNS records are required when Avahi browsing is available. Physical
+printing and discovery from another machine remain hardware acceptance checks.

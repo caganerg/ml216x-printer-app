@@ -56,7 +56,7 @@ Groups, in the order a full run uses:
             diffed against the committed docs/P5-MEASUREMENTS.json),
             transport-probe (plain plus both injections), server-probe (every
             web page served with the server still alive, and a printer
-            restored from state without being advertised) and g1-probe --all
+            restored from state with DNS-SD registration and a wildcard listener) and g1-probe --all
             (44 cases, plus all three injections)
   security  security-probe.py — reproduces the two libpappl 1.3.1 overflows.
             A FAILURE here most likely means libpappl was fixed, which is the
@@ -220,7 +220,7 @@ run_probes() {
     say "probes: transport-probe --inject flip"
     python3 scripts/transport-probe.py --inject flip
 
-    say "probes: server-probe (every web page, and state without DNS-SD)"
+    say "probes: server-probe (every web page, and state with DNS-SD)"
     # No injection flag: the two previous releases are the injection, and
     # `--application` is how the script was shown to go red against them. See
     # its docstring.

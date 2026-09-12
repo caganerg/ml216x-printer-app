@@ -1,3 +1,9 @@
+> Current behaviour (Q-26, alpha-8): normal servers now bind all network
+> interfaces and advertise through PAPPL. The loopback-only mitigation discussed
+> below describes older releases and no longer applies. The dependency raster
+> defects are network-reachable. Restrict TCP 8631 to trusted clients. Remote
+> administration remains disabled; TLS remains disabled.
+
 # Security review — 2.0 printer application
 
 This is the P9 security review. It covers what the printer application exposes

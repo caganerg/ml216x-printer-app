@@ -94,19 +94,6 @@ pub struct Application {
     pub probe_output: Option<CString>,
     pub port: u16,
     pub spool_directory: CString,
-    /// The state file to load, clear the DNS-SD names of and save back to
-    /// (decision Q-24), or `None` to leave state handling to PAPPL's
-    /// mainloop.
-    ///
-    /// Taking it over is what makes declining the DNS-SD announcement
-    /// possible: PAPPL advertises every printer that comes out of the state
-    /// file, `papplSystemRun` does it for each printer that still has a
-    /// DNS-SD name, and the mainloop loads the file after the system callback
-    /// has returned — so the one moment at which the names can be cleared is
-    /// inside a load this application performs itself. The mainloop stands
-    /// aside for a system that already has a save callback. The binary decides
-    /// which runs qualify and where the file is; see its `state` module.
-    pub state_file: Option<CString>,
 }
 
 /// The application currently running its mainloop.
@@ -472,18 +459,18 @@ unsafe extern "C" fn system_cb(
             if raw.is_null() {
                 return Err(Error::NullPointer("system"));
             }
-            if !sys::papplSystemAddListeners(raw, c"127.0.0.1".as_ptr()) {
-                return Err(error("could not bind the loopback listener"));
+            // PAPPL's documented NULL listener binds IPv4/IPv6 any-address.
+            // File-only harnesses remain confined to loopback.
+            let listener = if app.probe || app.probe_output.is_some() {
+                c"127.0.0.1".as_ptr()
+            } else {
+                ptr::null()
+            };
+            if !sys::papplSystemAddListeners(raw, listener) {
+                return Err(error("could not bind the IPP listener"));
             }
-            // The driver list is registered here rather than left to the
-            // mainloop, which does it after this callback returns and only
-            // `if (system->num_drivers == 0)`. Doing it first is what lets the
-            // state file be loaded below: restoring a printer runs
-            // `papplPrinterCreate`, which asks the driver callback for that
-            // printer's capabilities, so a printer restored before the list
-            // exists would be refused and the user would lose it. Q-17's null
-            // `autoadd_cb` is unchanged and deliberate — a device ID is
-            // self-reported, so nothing may add a destination on its own.
+            // Register before creating the file-only harness printer below.
+            // Normal server state loading is left to PAPPL's mainloop.
             sys::papplSystemSetPrinterDrivers(
                 raw,
                 1,
@@ -515,43 +502,6 @@ unsafe extern "C" fn system_cb(
             // persisted as before.
             if app.probe || app.probe_output.is_some() {
                 sys::papplSystemSetSaveCallback(raw, Some(discard_state), ptr::null_mut());
-            }
-            // Decision Q-24, and the reason this callback loads state at all.
-            // PAPPL advertises every printer it restores: `papplSystemRun`
-            // registers a DNS-SD service for each one that has a DNS-SD name,
-            // and for the system itself, immediately after this returns. A
-            // printer with no name is skipped — that is the only hook 1.3.1
-            // offers, and the only moment at which the name can be taken away
-            // is between the load and the run, where the mainloop leaves no
-            // callback. So the load happens here instead, which the mainloop
-            // then stands aside from because a save callback is installed
-            // (`if (!system->save_cb)`).
-            //
-            // `papplPrinterSetDNSSDName` is the supported way to say it and it
-            // cannot be said from an event callback: PAPPL raises
-            // `PAPPL_EVENT_PRINTER_CREATED` holding the printer's lock for
-            // reading, and this takes it for writing, so the thread that
-            // created the printer deadlocks. Here no PAPPL lock is held. A
-            // failed load is not an error — the first run has no file yet, and
-            // `papplSystemLoadState` reports the reason itself.
-            //
-            // One gap is known and left: a printer added through the web
-            // interface's own "Add Printer" form is advertised for the rest of
-            // that server's life, because PAPPL registers it there explicitly
-            // (`_papplSystemWebAddPrinter`), after the event this cannot use.
-            // The next start clears it. The `add` sub-command, which the
-            // README documents, does not go that way.
-            if let Some(path) = &app.state_file {
-                sys::papplSystemLoadState(raw, path.as_ptr());
-                sys::papplSystemSetDNSSDName(raw, ptr::null());
-                sys::papplSystemIteratePrinters(raw, Some(decline_dnssd), ptr::null_mut());
-                // The path outlives the mainloop: it belongs to the
-                // `Application`, which `run` borrows for the whole call.
-                sys::papplSystemSetSaveCallback(
-                    raw,
-                    Some(save_state),
-                    path.as_ptr().cast_mut().cast(),
-                );
             }
             // A file destination is how both drivers are exercised without
             // hardware: the probe writes JSON Lines to it, and the SPL2 driver
@@ -592,36 +542,6 @@ unsafe extern "C" fn system_cb(
 /// destination should leave state. See Q-15 and the call site in `system_cb`.
 unsafe extern "C" fn discard_state(_system: *mut sys::pappl_system_t, _data: *mut c_void) -> bool {
     unsafe { guard(ptr::null_mut(), false, || Ok(true)) }
-}
-
-/// A server's save callback: PAPPL's own, on the path this application owns.
-///
-/// The mainloop installs `papplSystemSaveState` by casting it to the callback
-/// type and passing the file name as the context pointer. Wrapping it instead
-/// of casting keeps the signatures honest on this side: `data` is the path
-/// [`Application::state_file`] holds, which outlives the mainloop.
-unsafe extern "C" fn save_state(system: *mut sys::pappl_system_t, data: *mut c_void) -> bool {
-    unsafe {
-        guard(ptr::null_mut(), false, || {
-            Ok(sys::papplSystemSaveState(system, data.cast::<c_char>()))
-        })
-    }
-}
-
-/// Q-24: take the DNS-SD name away from a printer restored from state.
-///
-/// Called for every printer in the system, from the system callback, before
-/// `papplSystemRun` reaches the loop that would advertise them. The name is
-/// the only thing PAPPL checks there, so clearing it is the whole of the
-/// decision; nothing else about the printer changes, and IPP on the loopback
-/// address is untouched.
-unsafe extern "C" fn decline_dnssd(printer: *mut sys::pappl_printer_t, _data: *mut c_void) {
-    unsafe {
-        guard(ptr::null_mut(), (), || {
-            sys::papplPrinterSetDNSSDName(printer, ptr::null());
-            Ok(())
-        })
-    }
 }
 
 struct System(*mut sys::pappl_system_t);
@@ -1083,7 +1003,6 @@ mod tests {
             probe_output: None,
             port: 8631,
             spool_directory: CString::new("/tmp").unwrap(),
-            state_file: None,
         };
         // Rejected before the mainloop is entered, so no server is started.
         let message = app.run(&[]).unwrap_err().to_string();
@@ -1175,7 +1094,6 @@ mod tests {
             probe_output: None,
             port: 8631,
             spool_directory: CString::new("/tmp").unwrap(),
-            state_file: None,
         };
         let mut data: sys::pappl_pr_driver_data_t = unsafe { std::mem::zeroed() };
         let mut context = RunContext {

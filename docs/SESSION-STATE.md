@@ -1,3 +1,7 @@
+> Current update: Q-26 / alpha-8 restores PAPPL DNS-SD and direct network IPP.
+> Q-23/Q-24 suppression and Q-18 loopback-only binding below are historical.
+> PAPPL again owns persistence; CUPS queue creation/sharing is optional.
+
 # Session State — PAPPL migration
 
 *Updated 2026-09-12.*

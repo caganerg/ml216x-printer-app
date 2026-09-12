@@ -1,6 +1,6 @@
 Source: ml216x-printer-app
 Package: ml216x-printer-app
-Version: 2.0.0~alpha-7
+Version: 2.0.0~alpha-8
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -23,7 +23,7 @@ Description: Printer application for Samsung ML-216x laser printers
  .
  It runs entirely in user space: a systemd user service in your own session,
  as your own user, with no root process and no setuid binary anywhere in the
- path. It serves IPP on the loopback address, advertises itself over DNS-SD,
+ path. It serves IPP on the network interfaces, advertises itself over DNS-SD,
  and prints to a printer reached by a socket:// or usb:// device URI that you
  choose yourself. Its state lives in your $XDG_CONFIG_HOME and its spool in
  your runtime directory. A packaged udev rule tags the hardware-confirmed

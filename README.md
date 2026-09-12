@@ -17,8 +17,8 @@ need hardware measurement (G-1), including vertical placement (Q-13). **A green
 badge above does not mean the margins are right**: every check is software, and
 what it cannot cover is listed in [docs/CI.md](docs/CI.md).
 The [P9 security review](docs/SECURITY-REVIEW.md) reproduced two memory
-corruption bugs in the tested libpappl dependency. Loopback binding limits
-network exposure but does not fix these bugs. See the
+corruption bugs in the tested libpappl dependency. The network listener makes these dependency bugs reachable by network clients;
+use a trusted network and restrict access to TCP port 8631. See the
 [current migration state](docs/SESSION-STATE.md) for outstanding work.
 
 ## Workspace
@@ -97,8 +97,8 @@ maintainer scripts.
 ### Install it
 
 ```sh
-sudo apt install ./dist/ml216x-printer-app_2.0.0~alpha-7_amd64.deb
-systemctl --user start ml216x-printer-app     # or just log out and back in
+sudo apt install ./dist/ml216x-printer-app_2.0.0~alpha-8_amd64.deb
+systemctl --user restart ml216x-printer-app   # also replaces a running older version
 systemctl --user status ml216x-printer-app
 ```
 
@@ -111,25 +111,25 @@ used to run. Printers you had added are untouched: they live in
 `systemctl --global enable`, which enables the service in every user's own
 service manager, so it starts by itself at the next login. It cannot be
 started from the package into a session that is already open, which is what
-the explicit `start` above is for.
+the explicit `restart` above is for.
 
-Once running it listens on the loopback address at port 8631. **It does not
-advertise itself over DNS-SD** (decisions Q-23 and Q-24): a service
-announcement naming a port nothing off this machine can open is a promise it
-cannot keep, and it produced a second, undeletable queue on the desktop — see
-"Keep it to one queue". It declines by giving its printers no DNS-SD name at
-all, so the announcement is never attempted; nothing appears in the log about
-it. 2.0.0~alpha-6 did it another way and logged `Unable to initialize DNS-SD:
-Daemon not running` twice at every start — if you see that line, you are
-running that version, which should be replaced: it also crashed on
-`ml216x-printer-app devices` and on the web interface's "Add Printer" page.
-Until you add a printer the server does nothing else.
+Once running it serves IPP on all IPv4/IPv6 interfaces at port 8631 and uses
+PAPPL's normal DNS-SD announcements (Q-26). With `avahi-daemon` running,
+clients can discover the application directly; a separate CUPS sharing queue
+is optional. The local web interface is `http://localhost:8631/`.
+Remote administration remains disabled. IPP transport currently has TLS
+disabled, so use this service on a trusted network. Until you add a printer,
+there is no printer destination to use.
+
+Upgrading from alpha-7 preserves the same PAPPL state file and existing CUPS
+queues. Restart the user service after installing. No printer recreation or
+manual state-file edit is needed.
 
 Two consequences of running in your session are worth knowing before you rely
 on it:
 
-* **It stops when your session ends.** If the machine shares the queue to the
-  network through CUPS and should keep doing so while nobody is logged in,
+* **It stops when your session ends.** If the machine should serve the printer on the
+  network while nobody is logged in,
   enable lingering once: `sudo loginctl enable-linger $USER`. The user manager
   then starts at boot and the service with it.
 * **One user at a time on port 8631.** A second user logging in gets a service
@@ -194,29 +194,50 @@ Set `DEVICE_URI` to that URI before running `add`.
 The queue then appears to every IPP client as
 `ipp://localhost:8631/ipp/print/ML2160`, without a PPD.
 
-### Give CUPS a queue for it
+### Discover and use the printer
 
-CUPS *can* find the queue on its own over DNS-SD, but only when `avahi-daemon`
-is running **and** something is browsing for it — historically `cups-browsed`,
-which Debian 13 no longer installs by default. So do not wait for it to appear:
-name it explicitly, with the printer application running, since CUPS asks the
-printer what it can do at exactly this moment.
+Use your client's driverless printer selection to choose the announced
+Samsung printer. CUPS clients can enumerate it with `lpstat -e`; DNS-SD
+requires Avahi and working multicast DNS on the network, but does not require
+`cups-browsed` to create a permanent queue.
+
+For a direct network connection, use
+`ipp://<server-hostname>:8631/ipp/print/ML2160`. CUPS on port 631 is not needed
+as an intermediary. On PAPPL 1.3.1, after adding a printer with the CLI,
+restart once to trigger its startup advertisement:
 
 ```sh
-ml216x-printer-app printers   # the name you gave `add`; also http://localhost:8631/
-sudo lpadmin -p ML2160 -E -v ipp://127.0.0.1:8631/ipp/print/ML2160 -m everywhere
-lpstat -v                     # ML2160 -> ipp://127.0.0.1:8631/ipp/print/ML2160
+systemctl --user restart ml216x-printer-app
+lpstat -e
 ```
 
-`-m everywhere` installs no driver: it tells CUPS to ask the printer for its
-own capabilities, which is what this application exists to answer. From here
-`ML2160` is an ordinary printer in every application's print dialog.
+The web interface's Add Printer form also uses PAPPL's normal discovery
+behaviour; this application no longer clears names on restart.
 
-### Keep it to one queue
+### Optional permanent CUPS queue
 
-One printer should mean one queue: the IPP one above. Two other things on a
-Debian desktop create queues of their own, and both make copies that print
-through a different path than the one this project tests.
+If you want a fixed local queue name or your client lacks discovery, create
+one explicitly while the application is running:
+
+```sh
+sudo lpadmin -p ML2160 -E -v ipp://127.0.0.1:8631/ipp/print/ML2160 -m everywhere
+lpoptions -d ML2160
+```
+
+`-m everywhere` asks the IPP service for its capabilities. Existing queues
+using this URI continue to work. Sharing this CUPS queue is optional; it
+introduces another advertised service on port 631 alongside PAPPL on 8631.
+
+### Understand additional printer entries
+
+A discovered destination in `lpstat -e` is not necessarily a configured queue
+in `lpstat -p` or `lpstat -v`. A name such as `ML2160_thinkcentre` alone does
+not identify the component that created it. Inspect its URI or DNS-SD port:
+8631 is this application, 631 is CUPS. Multiple names do not send a job twice.
+Keep a preferred default if both an explicit queue and a discovered destination
+appear. Do not globally disable Avahi or cups-browsed just to hide an entry.
+
+A separate legacy USB queue is a different issue:
 
 * **Hotplug.** `system-config-printer-udev`'s `70-printers.rules` asks systemd
   to configure a queue whenever a USB printer is plugged in, which is where a
@@ -230,59 +251,7 @@ through a different path than the one this project tests.
   lsusb | grep -i samsung        # expected: ID 04e8:330f
   ```
 
-* **Browsing.** Anything that discovers printers over DNS-SD makes a copy of
-  what it finds. **Since 2.0.0~alpha-6 this application announces nothing**
-  (Q-23, and Q-24 for the way it does it now), so this source is closed at the
-  root; the rest of this bullet applies to a queue *CUPS* shares, and to
-  versions before that. One gap is worth knowing: a printer you add through
-  this application's **own web page** at `http://localhost:8631/`, rather than
-  with `ml216x-printer-app add`, is advertised until the service is next
-  restarted. PAPPL publishes it there itself, and the next start takes the
-  name away again.
-
-  `cups-browsed`, if installed and running, creates its own copy
-  of any queue it discovers over DNS-SD — including one advertised by
-  your own machine. The copy names itself: with `ML2160` already taken it
-  appends the host name and you get `ML2160_thinkcentre`, or whatever your
-  machine is called. A queue named `<your queue>_<your hostname>` is this and
-  nothing else.
-
-  **This project recommends turning `cups-browsed` off.** Debian 13 does not
-  install it by default, so on a fresh system there is nothing to do and no
-  duplicate appears; a running one is usually left over from an upgrade.
-
-  ```sh
-  systemctl status cups-browsed               # inactive or not-found: nothing to do
-  sudo systemctl disable --now cups-browsed   # recommended if it is running
-  sudo lpadmin -x ML2160_thinkcentre          # then delete the copy it made
-  ```
-
-  What that costs, stated plainly so the recommendation can be judged: nothing
-  for USB, which `cups-browsed` has no part in — a printer plugged into this
-  machine is found by udev and by CUPS' own `usb` backend, both untouched. What
-  it does is make printers *other* machines share appear in your list by
-  themselves. Without it they are still discoverable; you add them from the
-  "Add Printer" dialog rather than finding them already there. Reverse it at any
-  time with `sudo systemctl enable --now cups-browsed`.
-
-  CUPS itself makes copies too, and disabling `cups-browsed` does not stop
-  those: cupsd creates a **temporary** queue for a printer it discovers, which
-  is why deleting one does not keep it away — it is re-created from the
-  announcement rather than stored, and never appears in
-  `/etc/cups/printers.conf`. That is the shape this application's own
-  announcement used to take: a queue named `<printer>_<host>`, pointing at port
-  8631 on the machine's network address, which nothing can reach because the
-  server binds the loopback address only.
-
-  Keeping the copy is not dangerous, but it buys nothing and it can mislead.
-  It may not even work: this server binds the loopback address only, so a copy
-  reached through the machine's host name rather than `127.0.0.1` is a queue
-  that accepts jobs and cannot deliver them. It can also take the system
-  default, which sends jobs down a path this project does not test — and while
-  release gate G-1 is open, a page whose queue is in doubt is a measurement
-  wasted. Check with `lpstat -v` and delete it.
-
-Remove the extras and keep the IPP one. Queue names are yours; check the URI
+To remove a redundant legacy USB queue, check the URI
 rather than the name, and delete only those pointing at `usb://…`:
 
 ```sh

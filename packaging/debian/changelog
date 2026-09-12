@@ -1,3 +1,15 @@
+ml216x-printer-app (2.0.0~alpha-8) unstable; urgency=medium
+
+  * Follow PAPPL's normal DNS-SD discovery and direct network IPP model.
+    Serve on IPv4/IPv6 wildcard addresses at port 8631; CUPS sharing is optional.
+    Remote administration remains disabled; file-output harnesses stay local.
+  * Remove DNS-SD name clearing and the duplicated state-path/parser code.
+    PAPPL's mainloop resumes state persistence at the existing path.
+  * Update server regression checks and document discovery, optional permanent
+    queues, upgrade restart, and the network exposure of dependency defects.
+
+ -- Çağan ERGÜN <caganergun@tutanota.com>  Sat, 12 Sep 2026 14:00:00 +0300
+
 ml216x-printer-app (2.0.0~alpha-7) unstable; urgency=medium
 
   * Fixes two crashes that 2.0.0~alpha-6 shipped. Both were reproduced here,

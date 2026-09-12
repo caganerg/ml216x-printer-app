@@ -12,26 +12,11 @@ fixed.
    given no footer segfaults the first time anyone opens
    `http://localhost:8631/` — the address README recommends. Each page below
    must answer 200 and the server must still be running afterwards.
-2. **A printer restored from the state file is not advertised, and is still
-   there** (decision Q-24). The application loads its own state file so that
-   it can clear every DNS-SD name before PAPPL's registration loop runs. That
-   makes two things checkable in one run: the printer added before the restart
-   comes back, which is what proves the path this application computes is the
-   path PAPPL's mainloop was using, and the restarted server logs no
-   registration at all. Where `avahi-browse` is installed, the network is
-   asked directly as well.
-
-`--application` runs the checks against another binary, which is how the
-harness was shown to go red rather than asserted to. Against both binaries in
-`dist/` — 2.0.0~alpha-5 and 2.0.0~alpha-6, which both carry Q-23's mechanism —
-property 1 fails on the first page, `/`, with the server dead of SIGSEGV, and
-property 2 fails because those releases still ask PAPPL to register the
-printer: they stopped the announcement one layer lower, by cutting the process
-off from D-Bus, so the attempt failed instead of never being made. That is the
-evidence an `--inject` mode provides for the other probes; here the previous
-releases are the injection. What the network does when nothing stops the
-announcement at all was measured separately and is recorded under Q-24 in
-docs/DECISIONS.md.
+2. **PAPPL restores and advertises its printers**, and the normal server
+   listens on wildcard addresses (Q-26). The file is saved and loaded through
+   PAPPL's own mainloop, preserving existing installations. Registration is
+   checked in the log; where Avahi is available its resolved IPP record must
+   name this test port and printer. Network availability is reported explicitly.
 
 One check is conditional and says so when it skips. The "Add Printer" page is
 the only page that lists devices, and PAPPL hands its DNS-SD library a null
@@ -41,7 +26,7 @@ prevent, since the page is PAPPL's own. In an environment with no system bus
 the page is therefore not fetched, and the run says why.
 
 Where the state file goes is not this script's choice, and that is the point of
-checking it: the application computes the path PAPPL's mainloop used, so an
+checking it: PAPPL chooses its own state path, so an
 ordinary user's run lands in the scoped XDG_CONFIG_HOME below and a **root**
 run lands in `/var/lib/<base name>.state`, because PAPPL ignores
 XDG_CONFIG_HOME as root. CI's container runs as root and therefore exercises
@@ -127,7 +112,7 @@ def died(server):
 
 
 def start(application, port, work, log):
-    """A real server: no `--probe-output`, so it owns its state file (Q-24)."""
+    """A real server: no `--probe-output`, so PAPPL persists its state."""
     server = subprocess.Popen(
         [str(application), "--listen-port", str(port),
          "--spool-directory", str(work / "spool"), "server"],
@@ -166,28 +151,22 @@ def client(application, port, work, *args):
         env=dict(os.environ, XDG_CONFIG_HOME=str(work), TMPDIR=str(work)))
 
 
-def advertised(window=10):
-    """Records on the network naming this system or its printer, if askable.
-
-    `None` when there is no `avahi-browse` to ask. Otherwise the browse is
-    repeated for up to `window` seconds and returns as soon as anything shows
-    up, because a service registered a moment ago takes a query and a response
-    to become visible and a single immediate browse finds nothing either way.
-    Proving absence over mDNS is a matter of how long you waited, which is why
-    the assertion this probe fails on is the server's own log; this corroborates
-    it from the other side.
-    """
+def advertised(port, window=10):
+    """Resolved records for this test only; None means browsing unavailable."""
     deadline = time.monotonic() + window
     while True:
         try:
-            found = subprocess.run(["avahi-browse", "-aptr"], capture_output=True,
+            found = subprocess.run(["avahi-browse", "-rtpk", "_ipp._tcp"], capture_output=True,
                                    text=True, timeout=20)
         except FileNotFoundError:
             return None
         except subprocess.TimeoutExpired:
-            found = None
-        records = [line for line in (found.stdout.splitlines() if found else [])
-                   if PRINTER in line or "ML-216x" in line]
+            return None
+        if found.returncode != 0:
+            return None
+        records = [line for line in found.stdout.splitlines()
+                   if line.startswith("=;") and f";{port};" in line
+                   and "_ipp._tcp" in line and f"rp=ipp/print/{PRINTER}" in line]
         if records or time.monotonic() >= deadline:
             return records
 
@@ -230,7 +209,7 @@ def main():
     if failures:
         raise SystemExit("FAIL:\n  " + "\n  ".join(failures))
     print(f"PASS server: {len(PAGES)} page(s) served with the server still running, "
-          f"a printer restored from state, and nothing advertised")
+          f"a printer restored from state, and DNS-SD registration requested")
 
 
 def run(args, work, state, first, second, failures, known):
@@ -272,25 +251,47 @@ def run(args, work, state, first, second, failures, known):
                 f"the printers of an existing installation")
 
         registrations = [line for line in (work / "second.log").read_text().splitlines()
-                         if re.search(r"Registering DNS-SD name", line)]
-        if registrations:
-            # Not "was advertised": the log line is written before the
-            # attempt, so this catches a server that asked PAPPL to
-            # register and got away with it only because something else
-            # was broken. Q-24 is that the name is gone and the attempt is
-            # never made.
-            failures.append(
-                f"the server asked PAPPL to register {len(registrations)} "
-                f"DNS-SD service(s) for a printer restored from state, which "
-                f"decision Q-24 declines: {registrations[0].strip()}")
-        on_the_network = advertised()
+                         if re.search(r"Registering DNS-SD name", line) and f"[Printer {PRINTER}]" in line]
+        if not registrations:
+            failures.append("PAPPL did not attempt DNS-SD registration after restore")
+        # Linux exposes the actual listening address independently of the log.
+        # A loopback-only listener cannot honour a network announcement.
+        listeners = []
+        for table in ("/proc/net/tcp", "/proc/net/tcp6"):
+            if Path(table).exists():
+                for line in Path(table).read_text().splitlines()[1:]:
+                    fields = line.split()
+                    address, port = fields[1].split(":")
+                    if int(port, 16) == args.port and fields[3] == "0A":
+                        listeners.append(address)
+        if not any(set(address) == {"0"} for address in listeners):
+            failures.append(f"no wildcard IPP listener on port {args.port}: {listeners}")
+        on_the_network = advertised(args.port)
         if on_the_network is None:
-            known.append("avahi-browse is not installed, so the network itself "
-                         "was not asked; the server's log was")
-        elif on_the_network:
-            failures.append(
-                f"{len(on_the_network)} record(s) naming this server are on the "
-                f"network: {on_the_network[0]}")
+            known.append("Avahi browsing unavailable; DNS-SD registration was checked in the log only")
+        elif not on_the_network:
+            failures.append("Avahi is available but no resolved IPP record names this printer and port")
+        if on_the_network:
+            print(f"PASS DNS-SD: {len(on_the_network)} resolved record(s) for printer {PRINTER} on port {args.port}")
+            addresses = [record.split(";")[7] for record in on_the_network
+                         if record.split(";")[2] == "IPv4"
+                         and not record.split(";")[7].startswith("127.")]
+            if addresses:
+                connection = http.client.HTTPConnection(addresses[0], args.port, timeout=5)
+                try:
+                    connection.request("GET", "/")
+                    response = connection.getresponse()
+                    response.read()
+                    if response.status != 200:
+                        failures.append(f"network address HTTP status: {response.status}")
+                    else:
+                        print("PASS network HTTP: advertised non-loopback address served the web interface")
+                except (OSError, http.client.HTTPException) as error:
+                    failures.append(f"advertised network address is unreachable: {error}")
+                finally:
+                    connection.close()
+            else:
+                known.append("no non-loopback IPv4 announcement to test direct network HTTP")
         # The pages come last: one of them can end the process, and the
         # question above is about what the server did when it started.
         for page in PAGES:
