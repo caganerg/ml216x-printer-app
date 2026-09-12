@@ -17,8 +17,13 @@ need hardware measurement (G-1), including vertical placement (Q-13). **A green
 badge above does not mean the margins are right**: every check is software, and
 what it cannot cover is listed in [docs/CI.md](docs/CI.md).
 The [P9 security review](docs/SECURITY-REVIEW.md) reproduced two memory
-corruption bugs in the tested libpappl dependency. The network listener makes these dependency bugs reachable by network clients;
-use a trusted network and restrict access to TCP port 8631. See the
+corruption bugs in libpappl 1.3.1, the version Debian ships in stable, testing
+and unstable alike, and
+the network listener makes them reachable by network clients: on that library,
+use a trusted network and restrict access to TCP port 8631. **Both are fixed in
+upstream PAPPL 1.4.12**, which this application also supports and is tested
+against; it is not packaged by Debian, so [running it is a source
+build](#optional-pappl-1412-instead-of-the-archives-131). See the
 [current migration state](docs/SESSION-STATE.md) for outstanding work.
 
 ## Workspace
@@ -33,7 +38,7 @@ use a trusted network and restrict access to TCP port 8631. See the
 ## Build
 
 Dependencies: Rust 1.77+, `pkg-config`, a C compiler, `libpappl-dev`
-(>= 1.3, < 2.0; tested with 1.3.1), and `libcups2-dev`.
+(>= 1.3, < 2.0; tested against both 1.3.1 and 1.4.12), and `libcups2-dev`.
 
 ```sh
 cargo build --release
@@ -44,6 +49,46 @@ that preceded it was deleted at gate P11 (`docs/P11-DELETE-LIST.md`); it is
 still buildable from the annotated tag `v1.x-final`, and what it produced is
 still pinned here — the corpus in `goldens/` is replayed through
 `crates/spl2-core/src/replay.rs`, which is that filter's own page loop.
+
+### Optional: PAPPL 1.4.12 instead of the archive's 1.3.1
+
+Two libpappl releases are supported (decision Q-27 in
+[`docs/DECISIONS.md`](docs/DECISIONS.md)): the **1.3.1** in `libpappl-dev`,
+which needs nothing extra, and upstream **1.4.12**, which fixes four of the
+six libpappl defects in the security review — including the two memory
+corruption bugs reachable over IPP. Debian packages no 1.4.x at all — stable,
+testing and unstable all carry 1.3.1-2.1 and experimental carries nothing — so
+1.4.12 has to be built:
+
+```sh
+sudo apt install build-essential libavahi-client-dev libcups2-dev \
+    libgnutls28-dev libjpeg-dev libpam0g-dev libpng-dev libusb-1.0-0-dev \
+    zlib1g-dev
+sudo ./scripts/install-pappl-1.4.sh          # into /usr/local
+```
+
+The script checks the tarball against a recorded sha256 before building. Then
+build this tree against it — both variables, because one decides what the
+crate compiles against and the other what it loads at run time:
+
+```sh
+export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig
+export LD_LIBRARY_PATH=/usr/local/lib
+pkg-config --modversion pappl     # 1.4.12
+cargo build --release
+```
+
+Only the machine that **runs** the application needs this. A second computer
+printing to the queue speaks IPP and needs no libpappl at all.
+
+Two things worth knowing. Every PAPPL 1.x has soname `libpappl.so.1`, so
+nothing warns you if you compile against one release and run against the
+other; it is safe here — the structs are identical and the driver reads the
+page numbering off each job rather than assuming a release — but it does mean
+`LD_LIBRARY_PATH` (or `ldconfig`) is what actually selects the library. And a
+`.deb` built this way still declares the archive's `libpappl1t64`, because the
+package targets the archive; the 1.4.12 build is for running from the source
+tree.
 
 ## Debian package (.deb)
 
@@ -70,7 +115,12 @@ world-connectable, and its subcommands are the server's whole control surface
 The binary is dynamically linked against the archive's `libpappl1t64` and
 glibc. The musl static build the 1.x package used is gone: vendoring or
 statically linking a C library would take the package out of apt's security
-updates and make this project the response path for libpappl's CVEs.
+updates and make this project the response path for libpappl's CVEs. That
+applies to 1.4.12 as much as to 1.3.1: the package depends on the archive's
+library either way, and the 1.4.12 under
+[Build](#optional-pappl-1412-instead-of-the-archives-131) is something you
+install alongside that library rather than something shipped inside the
+`.deb`.
 
 > [!NOTE]
 > This is an alpha of the 2.0 line. The hard margins have not been measured on
@@ -349,11 +399,24 @@ The complete IPP media-type mapping is in
 ## Testing
 
 ```sh
+./scripts/run-checks.sh          # every group, the same list CI runs
+./scripts/run-checks.sh --list   # what each group covers
+```
+
+Or by hand:
+
+```sh
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all --check
 (cd goldens && sha256sum -c SHA256SUMS)
 ```
+
+Everything above runs against whichever libpappl is installed. To run it
+against the other supported release, set `PKG_CONFIG_PATH` and
+`LD_LIBRARY_PATH` as under
+[Build](#optional-pappl-1412-instead-of-the-archives-131); CI does both on
+every push.
 
 The workspace suite includes the legacy parser and 32 golden SPL streams,
 shared engine tests, FFI layout checks, and application capability tests.
@@ -388,7 +451,8 @@ and [golden validation](docs/GOLDEN-VALIDATION.md).
   and `engine.rs` (the SpliX geometry rules), `raster.rs` (the CUPS Raster
   V1/V2/V3 parser, behind the `golden-replay` feature)
 - `crates/pappl-sys/`, `crates/pappl/` — hand-written FFI for libpappl 1.3 and
-  the safe wrapper that owns every `unsafe` line and the callback boundary
+  1.4 and the safe wrapper that owns every `unsafe` line and the callback
+  boundary
 - `crates/ml216x-printer-app/` — the 2.0 binary: the SPL2 raster driver, the
   capability table, and `runtime.rs`, which keeps the control socket out of
   a shared directory (Q-19)
@@ -399,8 +463,10 @@ and [golden validation](docs/GOLDEN-VALIDATION.md).
   (`packaging/systemd/ml216x-printer-app.service` is the retired root system
   unit, kept as a record and no longer installed); `packaging/udev/` — the
   device-scoped rules
-- `scripts/` — `build-deb.sh` builds the package; `p5-probe.py`,
-  `transport-probe.py`, `security-probe.py` and `g1-probe.py` drive the printer
+- `scripts/` — `run-checks.sh` is the whole check list, and what CI runs;
+  `build-deb.sh` builds the package; `install-pappl-1.4.sh` builds the optional
+  upstream libpappl 1.4.12; `p5-probe.py`, `transport-probe.py`,
+  `server-probe.py`, `security-probe.py` and `g1-probe.py` drive the printer
   application over loopback, and `g1-page.c` generates the G-1 measurement page
 
 ## License

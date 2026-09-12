@@ -28,13 +28,19 @@ for tool in cargo pkg-config dpkg-deb; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed"
 done
 
-# The build-time half of decision Q-1, enforced rather than documented.
-# `crates/pappl-sys/build.rs` refuses the same range at compile time; failing
-# here first gives a message that names the packaging requirement.
+# The build-time half of decisions Q-1 and Q-27, enforced rather than
+# documented. `crates/pappl-sys/build.rs` refuses the same range at compile
+# time; failing here first gives a message that names the packaging requirement.
+#
+# The range admits both supported releases, but the package is meant to be built
+# against the archive's 1.3.1: that is the library its `libpappl1t64` dependency
+# resolves to on the user's machine. Building it against a self-built 1.4.12
+# works and is allowed — the ABI is the same — but the dependency it declares is
+# still the archive's, so this is not the way to ship 1.4.12 to anyone.
 pkg-config --exists pappl || die "libpappl-dev is not installed"
 PAPPL_VERSION=$(pkg-config --modversion pappl)
 pkg-config --atleast-version=1.3 pappl || die "libpappl $PAPPL_VERSION is older than 1.3"
-pkg-config --max-version=1.999 pappl || die "libpappl $PAPPL_VERSION is 2.x; decision Q-1 targets 1.3"
+pkg-config --max-version=1.999 pappl || die "libpappl $PAPPL_VERSION is 2.x; decisions Q-1 and Q-27 target 1.3 and 1.4"
 
 # Read from control rather than repeated here: the package was renamed once
 # already (samsung-ml2160-rust -> ml216x-printer-app in 2.0.0~alpha-5) and a

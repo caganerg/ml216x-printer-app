@@ -57,6 +57,45 @@ jobs:
       - run: ./scripts/run-checks.sh --self-test
       - run: ./scripts/run-checks.sh fmt clippy test features goldens
 
+  # The second supported libpappl, and the reason this job is gating rather
+  # than a signal: decision Q-27 says both 1.3.1 and 1.4.12 work, and a claim
+  # that only one of them is ever run is a claim nothing checks. The two
+  # releases genuinely differ where it matters to this driver — 1.4 numbers a
+  # job's pages from 0 where 1.3 numbers them from 1, which failed every job
+  # until the driver learned to read the base off the first page — so this is
+  # the job that would have caught that.
+  #
+  # No Debian suite packages 1.4.x, so it is built from source, by the same
+  # script the README hands a contributor. `deb` is deliberately not in the
+  # group list: the package targets the archive's library and is built by the
+  # `package` job against that.
+  pappl-1_4:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Install the target toolchain and PAPPL's build dependencies
+        run: |
+          set -eux
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            binutils build-essential ca-certificates cargo cups-ipp-utils curl git \
+            libavahi-client-dev libcups2-dev libgnutls28-dev libjpeg-dev libpam0g-dev \
+            libpng-dev libusb-1.0-0-dev pkg-config python3 rust-clippy rustc rustfmt \
+            zlib1g-dev
+      - uses: actions/checkout@v7
+      - name: Build and install PAPPL 1.4.12
+        run: ./scripts/install-pappl-1.4.sh "$GITHUB_WORKSPACE/pappl-1.4"
+      # Both variables, and not ldconfig: pkg-config decides what the crate is
+      # compiled against and the linker decides what it runs against, and the
+      # point of the job is that those are the same 1.4.12.
+      - name: The checks, against 1.4.12
+        run: |
+          set -eux
+          export PKG_CONFIG_PATH="$GITHUB_WORKSPACE/pappl-1.4/lib/pkgconfig"
+          export LD_LIBRARY_PATH="$GITHUB_WORKSPACE/pappl-1.4/lib"
+          test "$(pkg-config --modversion pappl)" = 1.4.12
+          ./scripts/run-checks.sh fmt clippy test features goldens probes security
+
   # The hardware-free harnesses, including every injection: a harness that has
   # never been shown to go red is not evidence, and running the injections on
   # every push is how that stays true rather than being a one-off claim in a
@@ -94,12 +133,17 @@ jobs:
           path: dist/*.deb
           if-no-files-found: error
 
-  # Deliberately not gating. This job reproduces the two unpatched libpappl
-  # overflows (S-1 and S-2 in docs/SECURITY-REVIEW.md) by crashing the server,
-  # and it fails when they stop reproducing — most likely because libpappl was
-  # fixed. That is news about the archive, not a defect in the change under
-  # test, so it must not block an unrelated pull request. A red run here means
-  # go and retire the matching review row.
+  # Deliberately not gating, and it is the *archive's* library that makes it
+  # so. This job reproduces the two libpappl overflows (S-1 and S-2 in
+  # docs/SECURITY-REVIEW.md) against trixie's 1.3.1, where both still crash the
+  # server, and it fails when they stop — most likely because Debian patched
+  # them, which is news about the archive rather than a defect in the change
+  # under test. A red run here means go and retire the matching review row.
+  #
+  # The same group against 1.4.12 *is* gating, in `pappl-1_4` above: there the
+  # expectation is the other way round — upstream fixed both, so a crash would
+  # be a new finding — and the probe reads which of the two it is talking to
+  # from the server's own Server: header rather than being told.
   security-signal:
     runs-on: ubuntu-latest
     container: debian:trixie

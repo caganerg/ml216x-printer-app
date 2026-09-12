@@ -4,10 +4,10 @@
 //!
 //! Two jobs:
 //!
-//! 1. Locate libpappl through `pkg-config` and emit the link flags. Decision
-//!    Q-1 fixes the target at Debian trixie's PAPPL 1.3.1 and guards the range
-//!    `>= 1.3, < 2.0`, so an out-of-range library fails the build here rather
-//!    than at run time.
+//! 1. Locate libpappl through `pkg-config` and emit the link flags. Decisions
+//!    Q-1 and Q-27 make both Debian trixie's PAPPL 1.3.1 and upstream 1.4.12
+//!    targets and guard the range `>= 1.3, < 2.0`, so an out-of-range library
+//!    fails the build here rather than at run time.
 //! 2. Compile and run `probe/layout_probe.c` against the installed headers and
 //!    save its output for `tests/layout.rs`. The bindings in this crate are
 //!    hand written; that test is the only thing that checks the transcription.
@@ -40,7 +40,13 @@ fn pkg_config(args: &[&str]) -> String {
         .to_string()
 }
 
-/// Enforce the `>= 1.3, < 2.0` guard from decision Q-1.
+/// Enforce the `>= 1.3, < 2.0` guard from decisions Q-1 and Q-27.
+///
+/// The range is wider than the two releases this tree is tested against, 1.3.1
+/// and 1.4.12, and deliberately so: what it protects is the declarations, and
+/// those are additive across 1.x — every symbol and every struct field here is
+/// in both, at the same offsets, which `tests/symbols.rs` and `tests/layout.rs`
+/// check against whatever is installed rather than taking it on trust.
 fn check_version(version: &str) {
     let mut parts = version.split('.');
     let major: u32 = parts
@@ -53,7 +59,7 @@ fn check_version(version: &str) {
         panic!(
             "PAPPL {version} is outside the supported range (>= 1.3, < 2.0).\n\
              This crate binds only symbols present in the 1.3 headers; see \
-             docs/DECISIONS.md Q-1."
+             docs/DECISIONS.md Q-1 and Q-27."
         );
     }
     println!("cargo:rustc-env=PAPPL_SYS_BUILT_AGAINST={version}");
@@ -62,6 +68,13 @@ fn check_version(version: &str) {
 fn main() {
     println!("cargo:rerun-if-changed=probe/layout_probe.c");
     println!("cargo:rerun-if-changed=build.rs");
+    // Two libpappl releases are supported, so switching between them is a
+    // thing that happens — a self-built 1.4.12 is selected by pointing
+    // pkg-config at its prefix. Without these, cargo would reuse the cached
+    // layout and version from the *other* library and the probe, which is the
+    // only thing checking the transcription, would not run again.
+    println!("cargo:rerun-if-env-changed=PKG_CONFIG_PATH");
+    println!("cargo:rerun-if-env-changed=PKG_CONFIG_LIBDIR");
 
     let version = pkg_config(&["--modversion", "pappl"]);
     check_version(&version);

@@ -1,4 +1,13 @@
-> Current update: Q-26 / alpha-8 restores PAPPL DNS-SD and direct network IPP.
+> Current update: Q-27 makes upstream PAPPL **1.4.12** a second supported and
+> tested libpappl, alongside the 1.3.1 Debian ships in stable, testing and
+> unstable alike. Nothing in the ABI differs; the one behavioural difference is
+> page numbering, and the driver now reads the base off each job instead of
+> assuming 1.3's. 1.4.12 fixes S-1, S-2, S-6 and S-7 in
+> `docs/SECURITY-REVIEW.md` and leaves S-4 and S-5. The `.deb` still depends on
+> the archive's library, so statements below about 1.3.1 being "the" target
+> should be read as "the target the package is built against".
+>
+> Earlier: Q-26 / alpha-8 restores PAPPL DNS-SD and direct network IPP.
 > Q-23/Q-24 suppression and Q-18 loopback-only binding below are historical.
 > PAPPL again owns persistence; CUPS queue creation/sharing is optional.
 
@@ -329,8 +338,9 @@ alpha-3; its reconnect/power-cycle hardware acceptance test remains open.
 Checks: **`./scripts/run-checks.sh`**, which is the whole list in one place and
 is what CI runs — `fmt`, `clippy` with `-D warnings`, `cargo test --workspace`,
 the `golden-replay` feature both ways, the golden checksums, all three
-`p5-probe.py` modes with the default mode's output diffed against
-`docs/P5-MEASUREMENTS.json`, `transport-probe.py` plain and with both
+`p5-probe.py` modes with the default mode's output diffed against the committed
+record for the libpappl it measured (`docs/P5-MEASUREMENTS.json` for 1.3,
+`docs/P5-MEASUREMENTS-1.4.json` for 1.4), `transport-probe.py` plain and with both
 injections, `g1-probe.py --all` plus its three injections, `security-probe.py`,
 and the `.deb` build. `--list` explains the groups, `--self-test` proves the
 runner still stops at the first failure. Every probe scopes `XDG_CONFIG_HOME`
@@ -349,12 +359,14 @@ not by a machine. The lints are fixed in `fb7aab7` with no output bytes moved.
 `scripts/run-checks.sh` now holds the check list, and
 `.github/workflows/checks.yml` runs that same script in a `debian:trixie`
 container — trixie's packaged rustc 1.85.0 against libpappl 1.3.1-2.1+b2, the
-combination decision Q-1/D-1 targets. Three jobs gate (`build-and-test`,
-`harnesses`, `package`); two deliberately do not (`security-signal`, because
-its failure most likely means libpappl was *fixed*, and `future-toolchain`,
-because a newer stable's new lint is not a regression in this tree). It also
-runs weekly, since both of those signals arrive without a commit. Full local
-run from an empty `target/`: 2 m 52 s, all eight groups green.
+combination decision Q-1/D-1 targets. Four jobs gate (`build-and-test`,
+`harnesses`, `package` and, since Q-27, `pappl-1_4`, which builds upstream
+1.4.12 from source and runs the software groups against it); two deliberately do
+not (`security-signal`, because its failure means the *archive's* libpappl was
+fixed, and `future-toolchain`, because a newer stable's new lint is not a
+regression in this tree). It also runs weekly, since both of those signals
+arrive without a commit. Full local run from an empty `target/`: 2 m 52 s, all
+eight groups green.
 
 Two things the work turned up:
 
@@ -503,6 +515,57 @@ own "Add Printer" form is advertised until the next restart: PAPPL registers
 it there explicitly, after the event Q-24 cannot use. Documented in the README
 and in Q-24; closing it would need an upstream fix or a thread racing PAPPL
 for a lock.
+
+## PAPPL 1.4.12 alongside 1.3.1, 2026-09-12 (decision Q-27)
+
+The maintainer asked for the application to be moved to PAPPL 1.4.12 and, once
+the packaging consequence was on the table, chose to support **both** releases
+rather than raise the floor. The packaging is the reason: Debian packages no
+1.4.x at all — stable, testing and unstable all carry 1.3.1-2.1 and
+experimental carries nothing, checked against ftp-master's madison service that
+day — so a floor
+of 1.4.12 would leave the `.deb`'s `libpappl1t64` dependency unsatisfiable from
+the archive and make every install build a C library first.
+
+**What had to change in the code was one thing.** PAPPL 1.3 passes `1` for a
+job's first page and 1.4 passes `0`, because upstream moved the increment past
+`rendpage` in its 1.4.9 fix to the number that callback receives. The driver
+compared PAPPL's number with its own 1-based counter for equality, so against
+1.4.12 **every job failed at its first page**: `transport-probe.py` went red on
+all six streams and all 17 P5 measurements moved. `check_pappl_page` now takes
+the base from the job's first page — 0 or 1, anything else fails the job — and
+requires the step from there. The QPDL page number on the wire is still the
+driver's own count, so no golden byte moved.
+
+**Everything else was already compatible, and that is measured.** `printer.h` is
+byte identical between the two releases, the layout probe prints the same 261
+lines against either, and all 49 bound symbols are exported by both. A binary
+built against the 1.4.12 headers was run against trixie's 1.3.1 on purpose and
+behaved correctly — which it has to be able to do, since every 1.x has soname
+`libpappl.so.1` and nothing in the toolchain would notice the swap.
+
+**The dependency's own defects are what the move is for.** 1.4.12 fixes four of
+the six libpappl findings in `docs/SECURITY-REVIEW.md`: S-1 and S-2 by
+reproduction here (a 1.3.1 server dies of SIGABRT and SIGSEGV; a 1.4.12 one
+survives both inputs), S-6 and S-7 by reading the 1.4.12 source against 1.3.1's.
+**S-4 and S-5 are unchanged in it** — the control socket is still created by the
+same libcups call and the null footer is still dereferenced — so Q-19's
+containment and Q-25's workaround both stay, and the Debian reports keep both
+items.
+
+Consequences worth knowing when reading a red run:
+
+* `scripts/security-probe.py` now decides what to expect from the version the
+  *running* server reports in its own `Server:` header, so it requires the crash
+  on 1.3 and the survival from 1.4.12. CI runs the group both ways.
+* There are two committed P5 records, and `run-checks.sh` picks by the version
+  the probe reported. A diff that fails on `page` lines only means pkg-config
+  and the dynamic linker found different libpappls.
+* CI's new gating `pappl-1_4` job builds 1.4.12 with
+  `scripts/install-pappl-1.4.sh`, which pins the tarball's sha256.
+* The documented test count was stale: the workspace has **156** tests with
+  `golden-replay` on, not the 163 two documents claimed, and three of the 156
+  are the new page-numbering tests.
 
 ## Step numbering
 

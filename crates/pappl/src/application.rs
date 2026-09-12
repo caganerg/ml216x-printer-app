@@ -177,6 +177,15 @@ impl RasterOptions {
 /// implementations keep their per-job state behind their own lock. Every method
 /// returning `Err` fails the job: nothing on this path may fall back to a
 /// plausible-looking default.
+///
+/// **`page` is PAPPL's own number and where it starts depends on the release**,
+/// so it is passed through exactly as PAPPL gave it rather than normalised
+/// here. PAPPL 1.3 passes `1` for a job's first page; 1.4 passes `0`, having
+/// moved its increment past `rendpage` in the 1.4.9 fix to the number that
+/// callback receives. Both then advance by one per page and never reset. A
+/// driver that needs a page number of its own should count its own pages and
+/// use this one only to check that the two stay in step — which is what
+/// `Spl2Driver::check_pappl_page` does, without assuming either base.
 pub trait RasterDriver: Send + Sync {
     fn start_job(
         &self,
@@ -223,6 +232,12 @@ pub trait RasterDriver: Send + Sync {
 ///
 /// This is the instrument that produced `docs/P5-MEASUREMENTS.json`, so its
 /// output format is evidence and must not drift.
+///
+/// It reports the `page` number raw, which is why there is a second committed
+/// record, `docs/P5-MEASUREMENTS-1.4.json`: the two supported PAPPL releases
+/// number a job's pages differently and an instrument that hid that would be
+/// worth less, not more. `scripts/run-checks.sh` picks the record to compare
+/// against from the version the probe itself reports.
 pub struct GeometryProbe;
 
 impl RasterDriver for GeometryProbe {

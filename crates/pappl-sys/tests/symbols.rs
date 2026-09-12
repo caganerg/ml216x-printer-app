@@ -2,14 +2,15 @@
 
 //! Symbol verification for the hand-written bindings.
 //!
-//! Decision Q-1 fixes the target at PAPPL 1.3.1 and requires a table asserting
-//! that no bound symbol is newer than 1.3. The 1.3.1 headers carry only one
-//! `@since` annotation in total, so a per-symbol "introduced in" column cannot
-//! be read out of them. What CAN be established mechanically is stronger for
-//! our purpose anyway:
+//! Decision Q-1 requires a table asserting that no bound symbol is newer than
+//! 1.3, and Q-27 keeps that requirement while adding 1.4.12 as a second
+//! target. The headers carry only one `@since` annotation in total, so a
+//! per-symbol "introduced in" column cannot be read out of them. What CAN be
+//! established mechanically is stronger for our purpose anyway:
 //!
 //! * every symbol this crate declares is **exported by the installed
-//!   libpappl**, which is 1.3.1 — so nothing bound here needs a newer library;
+//!   libpappl**, whichever of the two supported releases that is — so a
+//!   1.4-only symbol could not survive a run against Debian's 1.3.1;
 //! * `build.rs` refuses to build against anything outside `>= 1.3, < 2.0`.
 //!
 //! Together those two mean the binary cannot reference a symbol that 1.3

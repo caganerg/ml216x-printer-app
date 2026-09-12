@@ -1,8 +1,12 @@
 # PAPPL Symbol Table — nothing bound is newer than 1.3
 
 Decision Q-1 targets Debian trixie's PAPPL **1.3.1-2.1+b2** and requires a
-table asserting that no symbol `pappl-sys` binds is newer than 1.3. This is
-that table, plus the argument behind it.
+table asserting that no symbol `pappl-sys` binds is newer than 1.3. Decision
+Q-27 adds upstream **1.4.12** as a second supported and tested release without
+changing that requirement — the whole point of keeping it is that one binary
+can then run against either library, which it has to be able to do: every 1.x
+has soname `libpappl.so.1`, so the dynamic linker cannot tell the two apart.
+This is that table, plus the argument behind it.
 
 ## Why the table looks like this
 
@@ -18,9 +22,10 @@ requirement serves. The requirement exists so the binary never references
 something 1.3 lacks. Two checks together guarantee exactly that:
 
 1. **`tests/symbols.rs` asserts that every declared symbol is exported by the
-   installed `libpappl.so.1`**, which *is* 1.3.1. A symbol introduced after
-   1.3 would not be there, and the test would fail. This is a direct
-   observation of the target library, not a claim about release history.
+   installed `libpappl.so.1`**, and CI runs it against both supported
+   releases. A symbol introduced after 1.3 would be absent from Debian's
+   1.3.1 and the test would fail there. This is a direct observation of the
+   target library, not a claim about release history.
 2. **`build.rs` refuses to build outside `>= 1.3, < 2.0`**, so the library the
    test observes is always in range.
 
@@ -33,12 +38,15 @@ says stop and ask rather than raising the floor.
 
 ## The table
 
-Verified on 2026-09-05, and again on 2026-09-12 for the three symbols decision
-Q-24 added, against `libpappl-dev` / `libpappl1t64` 1.3.1-2.1+b2,
-`pkg-config --modversion pappl` = 1.3.1. All 49 symbols are exported by the
-installed library; `cargo test -p pappl-sys` re-checks this on every run.
+Verified on 2026-09-05; again on 2026-09-12 for the three symbols decision
+Q-24 added; and again the same day against **both** supported releases —
+`libpappl-dev` / `libpappl1t64` 1.3.1-2.1+b2 (`pkg-config --modversion pappl` =
+1.3.1) and a locally built upstream 1.4.12. All 49 symbols are exported by both
+libraries, with no entry present in one and missing from the other;
+`cargo test -p pappl-sys` re-checks this against whichever is installed on every
+run, and CI's `pappl-1_4` job is what makes sure that is not always the same one.
 
-| Symbol | Declared in | Exported by installed 1.3.1 |
+| Symbol | Declared in | Exported by 1.3.1 and by 1.4.12 |
 |---|---|---|
 | `papplMainloop` | `mainloop.h` | yes |
 | `papplMainloopShutdown` | `mainloop.h` | yes |
@@ -171,3 +179,42 @@ Runtime ownership and callback behaviour were cross-checked in the official
 - [mainloop-subcommands.c](https://github.com/michaelrsweet/pappl/blob/v1.3.1/pappl/mainloop-subcommands.c):
   mainloop deletes the system and reads `XDG_CONFIG_HOME` for its state path.
   The integration test scopes that directory to its temporary subprocess.
+
+## Q-27 additions — 2026-09-12: what 1.4.12 changes, measured
+
+Decision Q-27 made upstream 1.4.12 a second supported release. No declaration
+in `pappl-sys` changed, and that is a measurement rather than a hope.
+
+**Headers.** Diffed file by file against the 1.3.1 headers installed here:
+
+| Header | 1.3.1 → 1.4.12 |
+|---|---|
+| `printer.h` | **byte identical** — and it holds the bodies of `struct pappl_pr_options_s` and `struct pappl_pr_driver_data_s`, the two structs this crate cares most about |
+| `client.h`, `log.h`, `loc.h`, `mainloop.h`, `pappl.h`, `subscription.h` | byte identical |
+| `base.h` | one added constant, `IPP_OP_PAPPL_CREATE_PRINTERS` |
+| `device.h` | two added functions, `papplDeviceRemoveScheme` and `papplDeviceRemoveTypes` |
+| `job.h` | three added `pappl_jreason_t` bits (`JOB_CANCELED_AFTER_TIMEOUT`, `JOB_FETCHABLE`, `JOB_SUSPENDED_FOR_APPROVAL`) and six added functions (`papplJobGetCopies`, `papplJobGetCopiesCompleted`, `papplJobResume`, `papplJobRetain`, `papplJobSetCopiesCompleted`, `papplJobSuspend`) |
+| `system.h` | one added include of `device.h` and one added function, `papplSystemCreatePrinters` |
+
+Every difference is an **addition**, nothing this crate binds moved, and none of
+the additions is bound — Q-1's rule that a 1.4-only symbol means stop and ask is
+not being quietly bent.
+
+**Layout.** `probe/layout_probe.c` was compiled and run against each release in
+turn and its output compared: the two files are identical, all 261 lines. Same
+8 type sizes and alignments, same 128 field offsets and sizes, same 69
+constants, and the same `cups_page_header2_t` of 1796 bytes from the same
+libcups 2.4.10 headers. The 1.4.12 build links `libcups.so.2` as well, so risk
+R-6 is neither better nor worse than it was.
+
+**A runtime version accessor does exist, for PAPPL.** The paragraph above about
+no runtime check being possible is about libcups's struct size, and stays true.
+PAPPL itself, though, puts its own version in every HTTP response's `Server:`
+header — `"<app>/<version> PAPPL/<version> CUPS IPP/2.0"`, built in
+`pappl/system.c` — and `scripts/security-probe.py` reads it from the running
+server to decide whether S-1 and S-2 should still reproduce. That matters
+because the soname cannot answer the question: `libpappl.so.1` is every 1.x, so
+a binary compiled against one release runs against another without a word from
+the linker. The mixed case was tried deliberately — a binary built against the
+1.4.12 headers, run against trixie's 1.3.1 — and behaves correctly, which is
+the consequence of the two tables above rather than luck.

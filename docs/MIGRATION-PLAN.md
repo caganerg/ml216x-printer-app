@@ -596,6 +596,16 @@ reasoning survives into the workspace.
 (1.3.1-2.1+b2). Do **not** build 1.4.x from source, do **not** vendor libpappl,
 do **not** link it statically.
 
+> **Amended by decision Q-27 (2026-09-12), on the maintainer's instruction.**
+> Upstream 1.4.12 is now a second supported target and *is* built from source,
+> by `scripts/install-pappl-1.4.sh`, because no Debian suite packages it —
+> stable, testing and unstable all carry 1.3.1-2.1. What it buys is the two
+> memory-corruption fixes recorded as S-1 and S-2 in
+> `docs/SECURITY-REVIEW.md`. The archive's 1.3.1 remains supported and remains
+> what the `.deb` depends on, and the two prohibitions this entry ends with —
+> never vendor, never static-link — are untouched. See Q-27 in
+> `docs/DECISIONS.md` for the measurements behind it.
+
 Reasoning to keep encoded here:
 - Nothing 1.4 added is needed by a monochrome raster driver. Upstream's own
   release notes list 1.4.0's additions as `job-retain-until`,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-//! Raw FFI declarations for libpappl 1.3.
+//! Raw FFI declarations for libpappl 1.3 and 1.4.
 //!
 //! This crate is the unsafe boundary and nothing more: `#[repr(C)]` types,
 //! function declarations, and the integer constants the C enums define. There
@@ -14,7 +14,12 @@
 //! Project rule 2 forbids inventing PAPPL signatures. Every item below carries
 //! the real declaration from `/usr/include/pappl/*.h` (PAPPL 1.3.1, Debian
 //! trixie `libpappl-dev` 1.3.1-2.1+b2) in its doc comment, so a reviewer can
-//! compare the two without opening the header.
+//! compare the two without opening the header. Every one of them reads the
+//! same in upstream 1.4.12, the other supported release (decision Q-27):
+//! `printer.h`, which holds the bodies of both large structs, is byte
+//! identical between the two; `base.h` and `system.h` differ only by additions
+//! this crate does not bind; and the layout probe measures the same 208
+//! records against either.
 //!
 //! Because the bindings are hand written rather than generated, nothing checks
 //! the transcription except a program compiled against the same headers:
@@ -32,9 +37,12 @@
 //!
 //! # Version
 //!
-//! Only symbols present in the 1.3 headers are bound (decision Q-1); the build
-//! script enforces `>= 1.3, < 2.0`. See `docs/PAPPL-SYMBOLS.md` for the table
-//! asserting that nothing bound here is newer than 1.3.
+//! Only symbols present in the 1.3 headers are bound (decisions Q-1 and
+//! Q-27); the build script enforces `>= 1.3, < 2.0`. See
+//! `docs/PAPPL-SYMBOLS.md` for the table asserting that nothing bound here is
+//! newer than 1.3, which is what lets one binary run against either release:
+//! the soname is `libpappl.so.1` for every 1.x, so the library a user's
+//! dynamic linker finds need not be the one this was compiled against.
 
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]

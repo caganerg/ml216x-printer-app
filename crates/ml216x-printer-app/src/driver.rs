@@ -83,6 +83,51 @@ struct JobState {
     writer: SplStreamWriter<Vec<u8>>,
     budget: JobBudget,
     page: Option<PageState>,
+    /// The number PAPPL gave this job's **first** page, which is where its own
+    /// page sequence starts. It is 1 under PAPPL 1.3 and 0 since 1.4, so it is
+    /// learned from the job rather than assumed; see `check_pappl_page`.
+    pappl_page_base: Option<u32>,
+}
+
+/// Cross-checks PAPPL's page number against the driver's own page counter.
+///
+/// The QPDL page number is the driver's, counted by `JobBudget::account_page`
+/// and 1-based because the protocol is. PAPPL counts the same pages
+/// independently, and this is the check that the two never drift apart — a
+/// silent disagreement would put the wrong page number, and with it the wrong
+/// tumble byte, on the wire.
+///
+/// **The two supported PAPPL releases start their sequence in different
+/// places**, which is the one behavioural difference the 1.4 move brought:
+///
+/// * 1.3 increments its counter at the top of the page loop and so passes `1`
+///   for the first page (`pappl/job-process.c:634` then `:664` in 1.3.1);
+/// * 1.4 increments it after `rendpage` instead and so passes `0`
+///   (`pappl/job-process.c:674` then `:823` in 1.4.12), part of upstream's
+///   1.4.9 fix to the number `rendpage` is given.
+///
+/// Both advance by exactly one per page and never reset, including when the
+/// client asked for a page range, so what can be checked without knowing the
+/// release is the *step*: PAPPL's number must stay `base + pages - 1` for the
+/// base its own first page established. A base other than 0 or 1 is not a
+/// numbering either release uses and fails the job rather than being adopted.
+fn check_pappl_page(base: &mut Option<u32>, page: u32, page_number: u32) -> Result<()> {
+    let base = *base.get_or_insert(page);
+    if base > 1 {
+        return Err(fail(format!(
+            "PAPPL numbered the first page of this job {base}; \
+             1.3 numbers from 1 and 1.4 from 0, so this is a numbering \
+             this driver has not been checked against"
+        )));
+    }
+    let expected = base + page_number - 1;
+    if page != expected {
+        return Err(fail(format!(
+            "PAPPL page {page} does not match job page {page_number} \
+             (expected {expected} from a sequence based at {base})"
+        )));
+    }
+    Ok(())
 }
 
 /// Turns PAPPL raster jobs into SPL2/QPDL.
@@ -212,6 +257,7 @@ impl RasterDriver for Spl2Driver {
                 writer,
                 budget: JobBudget::default(),
                 page: None,
+                pappl_page_base: None,
             },
         );
         Ok(())
@@ -237,14 +283,7 @@ impl RasterDriver for Spl2Driver {
         let page_number = state
             .budget
             .account_page(geometry.total_raster_bytes(), copies)?;
-        // PAPPL 1.3.1 numbers pages from 1 on this path and the QPDL page
-        // number is 1-based too; if that ever changes, the tumble byte and the
-        // page counter would silently disagree.
-        if page != page_number {
-            return Err(fail(format!(
-                "PAPPL page {page} does not match job page {page_number}"
-            )));
-        }
+        check_pappl_page(&mut state.pappl_page_base, page, page_number)?;
 
         let setup = PageSetup::new(&geometry, HARD_MARGIN_PT, page_number, &JobLog(job))?;
         state.writer.begin_page(&setup.config)?;
@@ -299,6 +338,13 @@ impl RasterDriver for Spl2Driver {
         drain(writer, device)
     }
 
+    /// The page number is deliberately **not** cross-checked here, unlike in
+    /// `start_page`. It is the number upstream found wrong and changed — the
+    /// 1.4.9 release note is "fixed page number that is passed to the raster
+    /// endpage function" — so releases between 1.4.0 and 1.4.8, which this
+    /// tree accepts but does not test, may well pass something else. The page
+    /// it closes is the one `start_page` opened in this job's state, and that
+    /// is not in doubt: `state.page` is `Some` for exactly one page at a time.
     fn end_page(
         &self,
         job: &Job<'_>,
@@ -529,5 +575,54 @@ mod tests {
         let mut options = full_media_options(&MEDIA_TABLE[0], [600, 600]);
         options.height = 4;
         assert!(page_geometry(&options).is_err());
+    }
+
+    /// Both numberings a supported PAPPL uses are accepted, and the driver's
+    /// own page number stays 1-based in either case. 1.3 passes 1 for the
+    /// first page, 1.4 passes 0; a four-page job through each is the shape the
+    /// check has to hold for.
+    #[test]
+    fn either_pappl_page_numbering_is_accepted() {
+        for base in [0, 1] {
+            let mut state = None;
+            for page_number in 1..=4 {
+                check_pappl_page(&mut state, base + page_number - 1, page_number)
+                    .unwrap_or_else(|e| panic!("base {base}, page {page_number}: {e}"));
+            }
+            assert_eq!(state, Some(base));
+        }
+    }
+
+    /// A job's base is established by its first page and then enforced: once
+    /// PAPPL has started at 0 it may not skip, repeat or restart a page, and
+    /// the same holds for a job based at 1. This is the drift the check exists
+    /// to catch, and dropping it would put the wrong QPDL page number — and
+    /// with it the wrong tumble byte — on the wire.
+    #[test]
+    fn a_page_out_of_step_with_the_driver_fails_the_job() {
+        for base in [0, 1] {
+            for wrong in [base, base + 2, base + 7] {
+                let mut state = Some(base);
+                // The driver has just counted its second page.
+                assert!(
+                    check_pappl_page(&mut state, wrong, 2).is_err(),
+                    "base {base} accepted {wrong} as its second page"
+                );
+            }
+        }
+    }
+
+    /// Neither release numbers a first page anything but 0 or 1, so a base
+    /// outside that is a numbering nothing here has been checked against and
+    /// fails the job instead of being adopted as this job's base.
+    #[test]
+    fn an_unknown_first_page_number_is_refused() {
+        for base in [2, 5, u32::MAX] {
+            let mut state = None;
+            assert!(
+                check_pappl_page(&mut state, base, 1).is_err(),
+                "base {base}"
+            );
+        }
     }
 }

@@ -32,30 +32,43 @@ contributor can reproduce a red run exactly.
 |---|---|---|
 | `fmt` | `cargo fmt --all --check` | — |
 | `clippy` | `cargo clippy --workspace --all-targets -- -D warnings` | — |
-| `test` | `cargo test --workspace` — 163 tests, the golden corpus among them | The corpus is the only thing that catches a PJL reordering (`docs/GOLDEN-VALIDATION.md` §2) |
+| `test` | `cargo test --workspace` — 156 tests, the golden corpus among them | The corpus is the only thing that catches a PJL reordering (`docs/GOLDEN-VALIDATION.md` §2) |
 | `features` | `spl2-core` built with **and** without `golden-replay`, plus the `qpdl-decode` example | Decision Q-6 put the CUPS raster parser behind a non-default feature precisely so it stays out of the shipping path; only a no-feature build proves it did |
 | `goldens` | `sha256sum -c goldens/SHA256SUMS` | A blessed corpus must not drift from its recorded checksums; the bless discipline depends on the checksums being real |
-| `probes` | `p5-probe` (3 modes, and its output **diffed against the committed `docs/P5-MEASUREMENTS.json`**), `transport-probe` plain and both injections, `server-probe` (every web page, and a printer restored from state with DNS-SD registration and a wildcard listener), `g1-probe --all` (44 cases) and all three injections | These drive the real application over loopback; they are the only checks that exercise PAPPL itself |
-| `security` | `security-probe.py` — reproduces the two libpappl 1.3.1 overflows | Its failure is news about the archive, not about this tree; see below |
+| `probes` | `p5-probe` (3 modes, and its output **diffed against the committed record for the PAPPL it measured** — `docs/P5-MEASUREMENTS.json` for 1.3, `docs/P5-MEASUREMENTS-1.4.json` for 1.4), `transport-probe` plain and both injections, `server-probe` (every web page, and a printer restored from state with DNS-SD registration and a wildcard listener), `g1-probe --all` (44 cases) and all three injections | These drive the real application over loopback; they are the only checks that exercise PAPPL itself |
+| `security` | `security-probe.py` — S-1 and S-2 against the libpappl that actually runs: they must still crash a 1.3 server and must **not** crash a 1.4.12 one, which is where upstream fixed them | Its failure is news about the dependency, not about this tree; see below |
 | `deb` | `sh -n` over the maintainer scripts, then `scripts/build-deb.sh` | The hand-built package path never substitutes `${shlibs:Depends}`, so the packaging has to be built to be believed |
 
 One thing the script adds that no single existing tool did: the P5 record is
 now **compared**, not just regenerated. `scripts/p5-probe.py` measures what
 PAPPL delivers and writes JSON; the claim in `docs/MARGINS.md` is that a rerun
-reproduces `docs/P5-MEASUREMENTS.json` byte for byte, and the script never
-checked that. The `probes` group diffs them.
+reproduces the committed record byte for byte, and the script never checked
+that. The `probes` group diffs them.
+
+Since decision Q-27 there are **two** committed records, because there are two
+supported libpappl releases and they number a job's pages differently: 1.3
+passes `1` for a job's first page, 1.4 passes `0`. The record is chosen by the
+version the probe itself reports, so a release nobody has measured stops the
+run instead of being diffed against the wrong record. If a diff ever fails on
+`page` lines *only*, the likely cause is not the driver: pkg-config and the
+dynamic linker found different libpappls, which nothing else would complain
+about, since every 1.x has soname `libpappl.so.1`.
 
 ## The jobs
 
-All five run in a `debian:trixie` container, because decision Q-1/D-1 targets
-the libpappl Debian trixie ships (1.3.1-2.1+b2) and nothing else.
+All six run in a `debian:trixie` container. Five of them use the libpappl
+trixie ships (1.3.1-2.1+b2), which is what decision Q-1/D-1 targets and what
+the `.deb` depends on; `pappl-1_4` builds upstream 1.4.12 from source and runs
+the software checks against that, because decision Q-27 made it a second
+supported release and no Debian suite packages it.
 
 | Job | Toolchain | Groups | Gates? | What a red run means |
 |---|---|---|---|---|
 | `build-and-test` | trixie's packaged rustc (1.85.0) | `--self-test`, then `fmt clippy test features goldens` | yes | A defect in the change under test — or, if `--self-test` is what failed, in the runner itself |
 | `harnesses` | trixie's packaged rustc | `probes` | yes | Either the driver's geometry moved, or a harness stopped being able to detect that it moved |
+| `pappl-1_4` | trixie's packaged rustc, against a source-built PAPPL 1.4.12 | `fmt clippy test features goldens probes security` | yes | The tree no longer works against the second supported libpappl. It gates because "both releases work" is otherwise a claim nothing checks — and the releases do differ: the page-numbering change in 1.4 failed every job until the driver stopped assuming 1.3's base |
 | `package` | trixie's packaged rustc | `deb` | yes | The package no longer builds; the built `.deb` is uploaded as an artifact |
-| `security-signal` | trixie's packaged rustc | `security` | **no** | Most likely **libpappl was fixed** — go and retire the matching row in `docs/SECURITY-REVIEW.md`. It does not gate, because that is news about the archive and must not block an unrelated pull request |
+| `security-signal` | trixie's packaged rustc | `security` | **no** | Most likely **Debian patched libpappl** — go and retire the matching row in `docs/SECURITY-REVIEW.md`. It does not gate, because that is news about the archive and must not block an unrelated pull request. The same group inside `pappl-1_4` *does* gate, where the expectation is reversed: 1.4.12 fixed both, so a crash there would be a new finding |
 | `future-toolchain` | current stable, via rustup | `fmt clippy test features` | **no** | A newer compiler's new lint or a behaviour change. Advisory on purpose: this is the drift that went unnoticed until it was typed by hand, and it should warn before the next Debian rustc makes it blocking |
 
 The workflow also runs weekly (`cron: 17 5 * * 1`). Two of the signals above

@@ -5,6 +5,15 @@ for S-1 and S-2. This is the text, written out so submitting it is a copy and a
 send. **Nothing here has been filed.** When it is, put the bug number in
 `docs/SECURITY-REVIEW.md` and in `README.md`, and change this file's first line.
 
+**Update 2026-09-12 (decision Q-27).** Upstream PAPPL 1.4.12 has since been
+built and tested against this tree, which sharpens both reports rather than
+retiring them. Of the six libpappl defects, **1.4.12 fixes four — S-1, S-2,
+S-6 and S-7 — and leaves S-4 and S-5 exactly as 1.3.1 has them.** Trixie, forky
+(testing) and sid all still carry 1.3.1-2.1, so everything below stands as a
+report against Debian; what changes is that "fixed upstream" is now a verified
+claim about a release that was run here, not a reading of a changelog. Where a
+report says a defect is fixed upstream, 1.4.12 is the release to name.
+
 There are now **two** reports here. The first is the memory-safety pair,
 unchanged. The second, added 2026-09-12, is the three crashes and hangs
 reachable through a printer application's web interface (S-5, S-6 and S-7).
@@ -41,7 +50,7 @@ Tags: security upstream fixed-upstream
 Dear Maintainer,
 
 libpappl 1.3.1 as shipped in trixie carries two memory-safety defects that
-are fixed in upstream PAPPL but not in the packaged version. Both are
+are fixed in upstream PAPPL 1.4.12 but not in the packaged version. Both are
 reachable by any client that can open a printer application's IPP port, and
 both were reproduced to a crash against 1.3.1-2.1+b2 on trixie (amd64) while
 developing a printer application against this library.
@@ -109,13 +118,12 @@ accepted with no authentication service configured.
 
 Exposure
 
-In my own application the listener is bound to 127.0.0.1, which makes both
-faults local rather than remote. That is a property of my configuration and
-not of the library: papplSystemAddListeners takes whatever address the
-application passes, and a printer application that listens on a network
-interface — which is what the framework is for — inherits both as
-remotely reachable faults. I would not want the loopback case to set the
-severity.
+My own application now binds every interface, which is what
+papplSystemAddListeners(system, NULL) does and what a printer application is
+for, so both faults are remotely reachable in it. An application that binds
+127.0.0.1 instead has them as local faults only — that is a property of the
+configuration, not of the library, and I would not want the loopback case to
+set the severity.
 
 For (2) I am treating denial of service as the floor rather than the ceiling:
 a stack overflow with attacker-controlled contents is not something I am
@@ -124,8 +132,11 @@ willing to characterise more precisely from a black-box crash.
 Suggested fix
 
 Cherry-pick 4587888f50 and 44327aaac3 into the trixie package, or update to an
-upstream release that contains both. I have not prepared a patch against the
-Debian packaging; if that would help, say so and I will.
+upstream release that contains both. Both are two-line bounds clamps, and both
+are in upstream 1.4.12, which I have built and tested against my own
+application: the two reproducers below kill a 1.3.1-2.1+b2 server and cannot
+make a 1.4.12 one fall over. I have not prepared a patch against the Debian
+packaging; if that would help, say so and I will.
 
 Reproducers
 
@@ -166,7 +177,9 @@ Tags: upstream
 Dear Maintainer,
 
 Three defects in libpappl 1.3.1 make a printer application's own web
-interface unusable or fatal, depending on the machine. All three were found
+interface unusable or fatal, depending on the machine. Two of them, (2) and
+(3) below, are fixed in upstream 1.4.12; (1) is not, and is still present
+there. All three were found
 while developing a printer application against the trixie package, and all
 three were reproduced against 1.3.1-2.1+b2 on trixie (amd64). None of them
 needs an unusual configuration: the first needs only a printer application
@@ -230,8 +243,11 @@ Printer" page, which calls papplDeviceList(PAPPL_DEVTYPE_ALL, ...) at
 pappl/system-webif.c:512 — so on such a machine any client that can open the
 HTTP port can kill the server.
 
-Suggested fix: test the result of _papplDNSSDInit before browsing, as
-dnssd.c:467 and :937 already do for registration.
+Suggested fix: cherry-pick it from upstream 1.4.12, which already does this —
+pappl_dnssd_find there takes the client into a variable and returns cleanly
+when it is NULL, releasing the lock on the way out. Otherwise: test the result
+of _papplDNSSDInit before browsing, as dnssd.c:467 and :937 already do for
+registration.
 
 (3) The DNS-SD lock is not released when a browse fails
     pappl/device-network.c:459-464, pappl_dnssd_find
@@ -254,15 +270,20 @@ not succeed: the first request for "/addprinter" completed in 2.0 s, the
 second and third never completed and were cut off at 20 s. This is the
 ordinary case of a machine with D-Bus but no running avahi-daemon.
 
-Suggested fix: unlock on that path.
+Suggested fix: unlock on that path. Upstream 1.4.12 does, in the same place as
+(2) — both early returns there call _papplDNSSDUnlock() before returning.
 
 Exposure
 
-My own application binds 127.0.0.1, so for me these are local: any account on
-the machine can stop the print server, repeatedly, by fetching a page. That is
-a property of my configuration rather than of the library — papplSystemAddListeners
-takes whatever address the application passes — and (1) in particular needs
-no argument, no form submission and no authentication, just a GET.
+My own application binds every interface, as papplSystemAddListeners(system,
+NULL) does, so anyone who can reach the HTTP port can stop the print server
+repeatedly by fetching a page; an application bound to 127.0.0.1 has the same
+faults as local ones. Either way (1) needs no argument, no form submission and
+no authentication, just a GET.
+
+Of these three, (2) and (3) are fixed in upstream 1.4.12, which I have built
+and tested; (1) is present there unchanged, so it is the one that needs a fix
+rather than a backport.
 
 Reproducer
 

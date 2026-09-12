@@ -14,9 +14,11 @@ answered. **Q-7 exists and is decided:** it asked whether the .deb should link
 libpappl statically or dynamically, and it is answered under Q-7 below (and
 folded into Q-1, which settled the same matter). Counting the decided entries
 as ten and treating Q-7 as unaccounted for is the arithmetic slip this note
-exists to prevent. **Q-12 through Q-25** were added later, by review and by
+exists to prevent. **Q-12 through Q-27** were added later, by review and by
 implementation rather than by the migration plan, and are the only entries
-outside the Q-1..Q-11 range.
+outside the Q-1..Q-11 range. **Q-27 changes an answer rather than adding one:**
+it makes upstream 1.4.12 a second supported libpappl alongside the 1.3.1 Q-1
+picked, so Q-1 and D-1 are read together with it.
 
 ---
 
@@ -1031,6 +1033,11 @@ see the regression recorded at `src/main.rs:427`.
 ### Q-1 — Which PAPPL version to target
 **Decision: Debian trixie's 1.3.1, dynamically linked. Guard `>= 1.3, < 2.0`.**
 
+> **Amended by Q-27 (2026-09-12):** upstream 1.4.12 is now a second supported
+> and tested target, built from source, which reverses this entry's "do not
+> build 1.4.x from source". The guard, the dynamic linking, and the rule that
+> no 1.4-only symbol may be bound are unchanged.
+
 Reasoning as above. Debian has 1.3.1-2.1 in bookworm, trixie, forky *and* sid,
 so there is no newer packaged version to move to; the tracker itself notes that
 upstream 1.4.12 is available and unpackaged.
@@ -1446,3 +1453,105 @@ port 8631 to trusted clients. This change does not fix those dependency bugs.
 The server probe verifies persistence, wildcard listening and registration;
 resolved mDNS records are required when Avahi browsing is available. Physical
 printing and discovery from another machine remain hardware acceptance checks.
+
+---
+
+## 2026-09-12 — Q-27 (DECIDED): both PAPPL 1.3.1 and 1.4.12, with 1.4.12 as the reference
+
+Requested by the maintainer: move the application to PAPPL 1.4.12. That is a
+change to Q-1/D-1, which named trixie's 1.3.1 as *the* target and said in as
+many words not to build 1.4.x from source, so the reasoning is recorded here
+rather than quietly amended there.
+
+**What was established before anything was changed.** Every Debian suite
+carries the same libpappl: 1.0.1-2 in bullseye, 1.3.1-2 in bookworm, and
+**1.3.1-2.1 in trixie, forky (testing) *and* sid**, with nothing in
+experimental — checked against ftp-master's madison service on 2026-09-12. So
+1.4.12 cannot be waited for and cannot be apt-installed; it can only be built.
+
+**The decision: accept both, keep the guard at `>= 1.3, < 2.0`, and treat
+1.4.12 as the release the tree is measured against.** The maintainer chose this
+over raising the floor to 1.4.12, and the packaging is why: the `.deb` depends
+on `libpappl1t64`, and a floor of 1.4.12 would make that dependency
+unsatisfiable from the archive, so every install — including the second machine
+that prints to this queue — would have to build a C library before apt could
+place the package. Only the machine that *runs* the application needs libpappl
+at all; a client needs nothing but IPP.
+
+### What 1.4.12 actually changes for this tree
+
+Measured, not assumed, on 2026-09-12 against a locally built 1.4.12 and
+trixie's 1.3.1-2.1+b2 side by side:
+
+* **Nothing in the ABI.** `pappl/printer.h`, which holds the bodies of
+  `pappl_pr_driver_data_s` and `pappl_pr_options_s`, is **byte identical**
+  between the two releases; `base.h`, `job.h`, `device.h` and `system.h` differ
+  only by added declarations this crate does not bind. `probe/layout_probe.c`
+  prints the same 208 records — every type size, every one of the 128 field
+  offsets, every constant — against either. All 49 bound symbols are exported
+  by both, so `docs/PAPPL-SYMBOLS.md`'s claim that nothing bound is newer than
+  1.3 still holds, and one binary may be compiled against either release and
+  run against the other. It has to be allowed to: every 1.x has soname
+  `libpappl.so.1`, so the dynamic linker cannot tell them apart and will not
+  warn.
+* **One behavioural difference, and it failed every job.** PAPPL 1.3 increments
+  its page counter at the top of the raster loop and passes `1` for a job's
+  first page; 1.4 increments it after `rendpage` and passes `0`, part of
+  upstream's 1.4.9 fix to the number `rendpage` receives. The driver
+  cross-checked PAPPL's number against its own 1-based counter for equality, so
+  against 1.4.12 the first page of every job was refused —
+  `scripts/transport-probe.py` went red on all six streams and the 17 P5
+  measurements all moved. `Spl2Driver::check_pappl_page` now learns the base
+  from the job's first page and requires the *step* rather than the value,
+  which is what both releases share. The QPDL page number on the wire is still
+  the driver's own, so no golden byte moved.
+* **Four of the six libpappl findings are gone.** S-1 (dithering) and S-2
+  (ready media) in `docs/SECURITY-REVIEW.md` are upstream's two 1.4.12 overflow
+  fixes: `scripts/security-probe.py` kills a 1.3.1 server with SIGABRT and
+  SIGSEGV respectively and cannot make 1.4.12 fall over, so the probe's
+  expectation is now read from the version the server reports rather than being
+  fixed at "must crash". S-6 (a null DNS-SD client) and S-7 (the Avahi lock
+  held after a failed browse) are fixed too, in one edit to `pappl_dnssd_find`
+  — established by reading the two sources, since this project stopped
+  provoking either in alpha-7. **S-4 and S-5 are unchanged**: the control
+  socket is created by the same libcups call and the null footer is still
+  resolved before it is tested, so Q-19's containment and Q-25's workaround
+  both stay. This is the whole benefit of the move, and it is the reason not to
+  leave 1.4.12 untested even though Debian's 1.3.1 keeps working.
+
+### Consequences applied
+
+* `docs/P5-MEASUREMENTS-1.4.json` joins `docs/P5-MEASUREMENTS.json`: two
+  releases that number pages differently need two records, and
+  `scripts/run-checks.sh` picks by the version the probe itself reports. An
+  unmeasured release stops the run instead of being diffed against the wrong
+  record.
+* `scripts/security-probe.py` reads the running libpappl's version out of the
+  server's own `Server:` header — `"<app>/<version> PAPPL/<version> CUPS
+  IPP/2.0"`, from `pappl/system.c`. That is the only runtime version accessor
+  the library has, and it is the right question to ask: pkg-config describes
+  the headers, not the library the process loaded.
+* CI grows a **gating** `pappl-1_4` job that builds 1.4.12 with
+  `scripts/install-pappl-1.4.sh` (checksum-pinned) and runs the software checks
+  against it. Support for two releases that nothing ever runs against would be
+  a claim, not a fact; this is the job that would have caught the page
+  numbering. The `deb` group stays on the archive's library, which is what the
+  package targets.
+* `crates/pappl-sys/build.rs` now declares `rerun-if-env-changed` for
+  `PKG_CONFIG_PATH` and `PKG_CONFIG_LIBDIR`. Switching libraries used to reuse
+  the cached layout from the other one, which would have left the transcription
+  unchecked at exactly the moment it most needed checking.
+
+### What is deliberately not done
+
+* **The floor is not raised and 1.4-only symbols are still not bound.** Q-1's
+  "stop and ask" rule survives intact: nothing here needs `papplJobRetain`,
+  `papplSystemCreatePrinters` or the other 1.4 additions.
+* **libpappl is still neither vendored nor statically linked.** D-1's reasons
+  hold whatever the version: the lintian `embedded-library` tag, dropping out
+  of apt security updates, and becoming the CVE response path.
+* **Releases 1.4.0 to 1.4.11 are accepted but untested.** The guard admits
+  them, and their page numbering is 1.4's, so they should work; but the
+  `rendpage` number upstream fixed in 1.4.9 is wrong in 1.4.0–1.4.8, which is
+  why `end_page` deliberately does not cross-check it. 1.4.12 is what is
+  measured because it is what the fixes are in.

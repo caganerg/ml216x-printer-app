@@ -47,21 +47,23 @@ Groups, in the order a full run uses:
 
   fmt       cargo fmt --all --check
   clippy    cargo clippy --workspace --all-targets -- -D warnings
-  test      cargo test --workspace (163 tests, includes the golden corpus)
+  test      cargo test --workspace (156 tests, includes the golden corpus)
   features  spl2-core built and tested both with and without `golden-replay`
             (decision Q-6), and the qpdl-decode example the G-1 harness uses
   goldens   sha256sum -c over goldens/SHA256SUMS, so a blessed corpus cannot
             drift from its recorded checksums
   probes    the hardware-free harnesses: p5-probe (3 modes, and its output
-            diffed against the committed docs/P5-MEASUREMENTS.json),
+            diffed against the committed record for the PAPPL it measured),
             transport-probe (plain plus both injections), server-probe (every
             web page served with the server still alive, and a printer
             restored from state with DNS-SD registration and a wildcard listener) and g1-probe --all
             (44 cases, plus all three injections)
-  security  security-probe.py — reproduces the two libpappl 1.3.1 overflows.
-            A FAILURE here most likely means libpappl was fixed, which is the
-            signal to retire the matching row in docs/SECURITY-REVIEW.md, not
-            a defect in this tree.
+  security  security-probe.py — S-1 and S-2 against the libpappl that
+            actually runs, which the script reads from the server's own
+            Server: header rather than from pkg-config. On 1.3 both must still
+            crash the server; from 1.4.12, where upstream fixed them, both
+            must survive it. Either way a FAILURE is about the dependency,
+            not about a defect in this tree.
   deb       sh -n over the maintainer scripts, then scripts/build-deb.sh
 
 No group needs a printer. Release gate G-1 is physical and is not covered.
@@ -145,6 +147,30 @@ build_app() {
     app_built=yes
 }
 
+# Which committed P5 record applies to a probe run, read out of the JSON the
+# probe just wrote rather than asked of pkg-config here: the record has to be
+# the one for the library that actually ran, and the probe is what ran it.
+#
+# Two releases are supported and they number a job's pages differently, so
+# there are two records (decision Q-27). A release with no record stops the run
+# rather than being diffed against the wrong one — and since a diff of the
+# right record failing *only* on `page` lines means the headers and the library
+# came from different PAPPLs, that case is named in the message too.
+p5_record() {
+    version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pappl"])' "$1")
+    case $version in
+    1.3.*) echo docs/P5-MEASUREMENTS.json ;;
+    1.4.*) echo docs/P5-MEASUREMENTS-1.4.json ;;
+    *)
+        echo "run-checks: no committed P5 record for PAPPL $version; this tree" \
+            "has measured 1.3 and 1.4 (decision Q-27). If a page number is the" \
+            "only difference, pkg-config and the dynamic linker found different" \
+            "libpappls." >&2
+        exit 1
+        ;;
+    esac
+}
+
 run_fmt() {
     say "fmt"
     cargo fmt --all --check
@@ -199,11 +225,20 @@ run_probes() {
 
     say "probes: p5-probe, default mode"
     python3 scripts/p5-probe.py --output "$work/p5.json"
-    # The script measures; it does not compare. docs/P5-MEASUREMENTS.json is
-    # the committed record of what PAPPL delivered, and P5's whole claim is
-    # that a rerun reproduces it byte for byte, so CI is where that gets
-    # checked rather than asserted.
-    diff -u docs/P5-MEASUREMENTS.json "$work/p5.json"
+    # The script measures; it does not compare. The committed record of what
+    # PAPPL delivered is what P5 claims a rerun reproduces byte for byte, so
+    # CI is where that gets checked rather than asserted.
+    #
+    # There are two records because there are two supported PAPPL releases and
+    # they number a job's pages differently — 1.3 from 1, 1.4 from 0 (decision
+    # Q-27). The probe reports the version it measured, so that is what selects
+    # the record; an unmeasured release stops the run rather than being
+    # compared against the wrong one.
+    # Plainly, not `record=$(...) || exit`: under `set -e` an assignment takes
+    # the substitution's exit status and ends the run, while the `||` form is
+    # the construct the header of this file warns about.
+    record=$(p5_record "$work/p5.json")
+    diff -u "$record" "$work/p5.json"
 
     say "probes: p5-probe --spl (QPDL page headers)"
     python3 scripts/p5-probe.py --spl --output "$work/p5-spl.json"
@@ -237,13 +272,13 @@ run_probes() {
 
 run_security() {
     build_app
-    say "security: reproduce the two libpappl 1.3.1 overflows"
+    say "security: the two libpappl overflows, against the libpappl that runs"
     python3 scripts/security-probe.py
 }
 
 run_deb() {
     say "deb: maintainer scripts parse"
-    for s in packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm scripts/build-deb.sh scripts/run-checks.sh; do
+    for s in packaging/debian/postinst packaging/debian/prerm packaging/debian/postrm scripts/build-deb.sh scripts/install-pappl-1.4.sh scripts/run-checks.sh; do
         sh -n "$s"
     done
     say "deb: build the package"

@@ -110,9 +110,21 @@ Two things worth knowing before you read a red run:
   page. Each injection *must be detected*; those cases pass when the harness
   catches the defect it planted. A red injection means the harness stopped
   working, not that the printer did.
-* The `security` group fails when the two libpappl overflows stop
-  reproducing, which most likely means libpappl was **fixed**. That job does
-  not gate anything. See `docs/CI.md`.
+* The `security` group asks a different question of each supported libpappl,
+  and reads which one it is talking to from the running server's own `Server:`
+  header. Against Debian's 1.3.1 the two overflows must still reproduce, so a
+  failure there most likely means the archive was **fixed** — go and retire the
+  row in `docs/SECURITY-REVIEW.md`; that job does not gate anything. Against
+  upstream 1.4.12, where they are fixed, the server must survive them, and
+  there the group *does* gate, because a crash would be a new finding. See
+  `docs/CI.md`.
+* **Two libpappl releases are supported** (decision Q-27): Debian's 1.3.1 and
+  upstream 1.4.12, which `scripts/install-pappl-1.4.sh` builds. A change to
+  anything touching the C boundary should be run against both — point
+  `PKG_CONFIG_PATH` and `LD_LIBRARY_PATH` at the 1.4.12 prefix and run the
+  script again. CI's `pappl-1_4` job does exactly that, and gates on it. The
+  two releases are not identical where it counts: 1.4 numbers a job's pages
+  from 0 and 1.3 from 1, and nothing outside the `probes` group notices.
 * Do not make the runner call a group as `run_$g || something`. A shell
   function on the left of `||` loses `set -e` for its whole body, so a failure
   in the middle of a group is ignored — this script shipped with exactly that

@@ -47,7 +47,11 @@ Description: Printer application for Samsung ML-216x laser printers
  in the print-options structure it hands to this driver, so libcups defines
  part of the ABI compiled against, but the binary references no libcups symbol
  and no automatic tool would record it. libpappl1t64 is bounded to
- >= 1.3, < 2.0 (decision Q-1), which is tighter than the shared-library
+ >= 1.3, < 2.0 (decisions Q-1 and Q-27), which is tighter than the shared-library
  symbols alone would produce: dpkg-shlibdeps computes >= 1.0.1, while the
  behaviour this driver relies on — how a job's resolution is selected, and how
- system state is persisted — was read from the 1.3.1 source.
+ system state is persisted — was read from the 1.3.1 source. The range is
+ satisfied by the 1.3.1 Debian ships in stable, testing and unstable alike,
+ which is what this package is built and tested against; upstream 1.4.12 is also
+ supported and tested, but it is packaged by no suite, so it is a source build
+ outside this package and the dependency deliberately does not ask for it.

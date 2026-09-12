@@ -1,0 +1,1093 @@
+{
+  "pappl": "1.4.12",
+  "cases": [
+    {
+      "medium": "iso_a4_210x297mm",
+      "input": {
+        "width": 2480,
+        "height": 3507,
+        "bytes_per_line": 310,
+        "inset": [
+          52,
+          52
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 2480,
+        "height": 3507,
+        "bytes_per_line": 310,
+        "dpi": [
+          300,
+          300
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          21000,
+          29700
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 3507,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 309,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 52,
+          "first_nonzero_byte": 6,
+          "last_nonzero_byte": 303,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 3454,
+          "first_nonzero_byte": 6,
+          "last_nonzero_byte": 303,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 3506,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 309,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "iso_a4_210x297mm",
+      "input": {
+        "width": 4960,
+        "height": 7015,
+        "bytes_per_line": 620,
+        "inset": [
+          104,
+          104
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 4960,
+        "height": 7015,
+        "bytes_per_line": 620,
+        "dpi": [
+          600,
+          600
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          21000,
+          29700
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 7015,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 619,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 104,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 606,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 6910,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 606,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 7014,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 619,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "iso_a4_210x297mm",
+      "input": {
+        "width": 9921,
+        "height": 7015,
+        "bytes_per_line": 1241,
+        "inset": [
+          208,
+          104
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 9921,
+        "height": 7015,
+        "bytes_per_line": 1241,
+        "dpi": [
+          1200,
+          600
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          21000,
+          29700
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 7015,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 1240,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 104,
+          "first_nonzero_byte": 26,
+          "last_nonzero_byte": 1214,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 6910,
+          "first_nonzero_byte": 26,
+          "last_nonzero_byte": 1214,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 7014,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 1240,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "iso_a4_210x297mm",
+      "input": {
+        "width": 9921,
+        "height": 14031,
+        "bytes_per_line": 1241,
+        "inset": [
+          208,
+          208
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 9921,
+        "height": 14031,
+        "bytes_per_line": 1241,
+        "dpi": [
+          1200,
+          1200
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          21000,
+          29700
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 14031,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 1240,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 208,
+          "first_nonzero_byte": 26,
+          "last_nonzero_byte": 1214,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 13822,
+          "first_nonzero_byte": 26,
+          "last_nonzero_byte": 1214,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 14030,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 1240,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "na_letter_8.5x11in",
+      "input": {
+        "width": 2550,
+        "height": 3300,
+        "bytes_per_line": 319,
+        "inset": [
+          52,
+          52
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 2550,
+        "height": 3300,
+        "bytes_per_line": 319,
+        "dpi": [
+          300,
+          300
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          21590,
+          27940
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 3300,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 318,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 52,
+          "first_nonzero_byte": 6,
+          "last_nonzero_byte": 312,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 3247,
+          "first_nonzero_byte": 6,
+          "last_nonzero_byte": 312,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 3299,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 318,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "na_letter_8.5x11in",
+      "input": {
+        "width": 5100,
+        "height": 6600,
+        "bytes_per_line": 638,
+        "inset": [
+          104,
+          104
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 5100,
+        "height": 6600,
+        "bytes_per_line": 638,
+        "dpi": [
+          600,
+          600
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          21590,
+          27940
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 6600,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 637,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 104,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 624,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 6495,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 624,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 6599,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 637,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "na_letter_8.5x11in",
+      "input": {
+        "width": 10200,
+        "height": 6600,
+        "bytes_per_line": 1275,
+        "inset": [
+          208,
+          104
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 10200,
+        "height": 6600,
+        "bytes_per_line": 1275,
+        "dpi": [
+          1200,
+          600
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          21590,
+          27940
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 6600,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 1274,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 104,
+          "first_nonzero_byte": 26,
+          "last_nonzero_byte": 1248,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 6495,
+          "first_nonzero_byte": 26,
+          "last_nonzero_byte": 1248,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 6599,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 1274,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "na_letter_8.5x11in",
+      "input": {
+        "width": 10200,
+        "height": 13200,
+        "bytes_per_line": 1275,
+        "inset": [
+          208,
+          208
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 10200,
+        "height": 13200,
+        "bytes_per_line": 1275,
+        "dpi": [
+          1200,
+          1200
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          21590,
+          27940
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 13200,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 1274,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 208,
+          "first_nonzero_byte": 26,
+          "last_nonzero_byte": 1248,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 12991,
+          "first_nonzero_byte": 26,
+          "last_nonzero_byte": 1248,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 13199,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 1274,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "na_legal_8.5x14in",
+      "input": {
+        "width": 5100,
+        "height": 8400,
+        "bytes_per_line": 638,
+        "inset": [
+          104,
+          104
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 5100,
+        "height": 8400,
+        "bytes_per_line": 638,
+        "dpi": [
+          600,
+          600
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          21590,
+          35560
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 8400,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 637,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 104,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 624,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 8295,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 624,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 8399,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 637,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "na_executive_7.25x10.5in",
+      "input": {
+        "width": 4350,
+        "height": 6300,
+        "bytes_per_line": 544,
+        "inset": [
+          104,
+          104
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 4350,
+        "height": 6300,
+        "bytes_per_line": 544,
+        "dpi": [
+          600,
+          600
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          18415,
+          26670
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 6300,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 543,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 104,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 530,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 6195,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 530,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 6299,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 543,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "iso_a5_148x210mm",
+      "input": {
+        "width": 3496,
+        "height": 4960,
+        "bytes_per_line": 437,
+        "inset": [
+          104,
+          104
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 3496,
+        "height": 4960,
+        "bytes_per_line": 437,
+        "dpi": [
+          600,
+          600
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          14800,
+          21000
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 4960,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 436,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 104,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 423,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 4855,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 423,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 4959,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 436,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "iso_a6_105x148mm",
+      "input": {
+        "width": 2480,
+        "height": 3496,
+        "bytes_per_line": 310,
+        "inset": [
+          104,
+          104
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 2480,
+        "height": 3496,
+        "bytes_per_line": 310,
+        "dpi": [
+          600,
+          600
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          10500,
+          14800
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 3496,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 309,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 104,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 296,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 3391,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 296,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 3495,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 309,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "jis_b5_182x257mm",
+      "input": {
+        "width": 4299,
+        "height": 6070,
+        "bytes_per_line": 538,
+        "inset": [
+          104,
+          104
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 4299,
+        "height": 6070,
+        "bytes_per_line": 538,
+        "dpi": [
+          600,
+          600
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          18200,
+          25700
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 6070,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 537,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 104,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 524,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 5965,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 524,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 6069,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 537,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "na_number-10_4.125x9.5in",
+      "input": {
+        "width": 2474,
+        "height": 5700,
+        "bytes_per_line": 310,
+        "inset": [
+          104,
+          104
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 2474,
+        "height": 5700,
+        "bytes_per_line": 310,
+        "dpi": [
+          600,
+          600
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          10477,
+          24130
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 5700,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 309,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 104,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 296,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 5595,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 296,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 5699,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 309,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "iso_dl_110x220mm",
+      "input": {
+        "width": 2598,
+        "height": 5196,
+        "bytes_per_line": 325,
+        "inset": [
+          104,
+          104
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 2598,
+        "height": 5196,
+        "bytes_per_line": 325,
+        "dpi": [
+          600,
+          600
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          11000,
+          22000
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 5196,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 324,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 104,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 311,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 5091,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 311,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 5195,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 324,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "iso_c5_162x229mm",
+      "input": {
+        "width": 3826,
+        "height": 5409,
+        "bytes_per_line": 479,
+        "inset": [
+          104,
+          104
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 3826,
+        "height": 5409,
+        "bytes_per_line": 479,
+        "dpi": [
+          600,
+          600
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          16200,
+          22900
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 5409,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 478,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 104,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 465,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 5304,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 465,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 5408,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 478,
+          "ones": 2
+        }
+      ]
+    },
+    {
+      "medium": "om_folio_210x330mm",
+      "input": {
+        "width": 4960,
+        "height": 7795,
+        "bytes_per_line": 620,
+        "inset": [
+          104,
+          104
+        ]
+      },
+      "callback": {
+        "event": "page-start",
+        "page": 0,
+        "width": 4960,
+        "height": 7795,
+        "bytes_per_line": 620,
+        "dpi": [
+          600,
+          600
+        ],
+        "header_margins": [
+          0,
+          0
+        ],
+        "media": [
+          21000,
+          33000
+        ],
+        "margin": 441,
+        "copies": 1
+      },
+      "line_count": 7795,
+      "marks": [
+        {
+          "event": "line",
+          "y": 0,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 619,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 104,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 606,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 7690,
+          "first_nonzero_byte": 13,
+          "last_nonzero_byte": 606,
+          "ones": 2
+        },
+        {
+          "event": "line",
+          "y": 7794,
+          "first_nonzero_byte": 0,
+          "last_nonzero_byte": 619,
+          "ones": 2
+        }
+      ]
+    }
+  ]
+}

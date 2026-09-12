@@ -1,16 +1,27 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-only
-"""Reproduce the two confirmed libpappl 1.3.1 overflows the driver rides on.
+"""Check the two libpappl overflows against the libpappl that actually runs.
 
 These are S-1 and S-2 in docs/SECURITY-REVIEW.md: an out-of-bounds write while
 libpappl dithers an 8-bit raster wider than the page, and a stack overflow when
 a client sends more media-ready values than PAPPL_MAX_SOURCE. Neither has a fix
-this project can make; the point of the script is that the findings can be
-re-run, and that they turn themselves off when libpappl is finally patched.
+this project can make, in either direction: the dependency decides.
 
-Each case submits its input over the loopback IPP port and asserts the server
-process died from a signal. If a future libpappl no longer crashes, the case
-FAILS here, which is the signal to retire the corresponding row in the review.
+Upstream fixed both in 1.4.12 (its CHANGES.md lists them as the two
+"CVE-2026-NNNNN" overflow-protection entries), and this tree supports both that
+release and the 1.3.1 Debian ships, so the expectation depends on the version:
+
+* below 1.4.12 each case must still kill the server, and a survivor means
+  libpappl was patched — the signal to retire the matching row in the review;
+* from 1.4.12 each case must leave the server running, and a crash means the
+  fix did not cover this input, which is a new finding rather than a known one.
+
+The version is read from the running server's own `Server:` header, which
+libpappl fills in as "<app>/<version> PAPPL/<version> CUPS IPP/2.0". That is
+the only runtime version accessor the library has, and asking the library that
+serves the request is the whole point: every 1.x has soname libpappl.so.1, so a
+binary compiled against one release can silently run against another, and
+pkg-config would describe the headers rather than the library under test.
 
 Everything is loopback and scoped to a temporary directory: XDG_CONFIG_HOME and
 TMPDIR point into it, so the developer's own PAPPL state is never touched.
@@ -18,7 +29,9 @@ TMPDIR point into it, so the developer's own PAPPL state is never touched.
 Requires: cargo build -p ml216x-printer-app, cc, libcups2-dev, ipptool.
 """
 import argparse
+import http.client
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -28,6 +41,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "target/debug/ml216x-printer-app"
+
+# The release that carries both fixes: PAPPL 1.4.12, 2026-08-20.
+FIXED_IN = (1, 4, 12)
 
 # S-1's generator, inlined so the script is self-contained. It writes an 8-bit
 # grayscale PWG raster whose width is overridden to something wider than any
@@ -76,6 +92,26 @@ def wait_for_port(port):
         except OSError:
             time.sleep(.05)
     return False
+
+
+def pappl_version(port):
+    """The libpappl the running server loaded, as a (major, minor, patch) tuple.
+
+    Read from its own Server: header, which pappl/system.c builds as
+    "<app>/<version> PAPPL/<version> CUPS IPP/2.0". An unreadable header stops
+    the run: guessing the version would decide the expectation below, and a
+    guessed expectation is worse than no check at all.
+    """
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        connection.request("GET", "/")
+        header = connection.getresponse().getheader("Server") or ""
+    finally:
+        connection.close()
+    found = re.search(r"PAPPL/(\d+)\.(\d+)\.(\d+)", header)
+    if not found:
+        raise SystemExit(f"no PAPPL version in the server's Server: header {header!r}")
+    return tuple(int(part) for part in found.groups())
 
 
 def start_server(tmp, env, port):
@@ -138,6 +174,7 @@ def run_case(name, port):
         env = dict(os.environ, XDG_CONFIG_HOME=str(tmp), TMPDIR=str(tmp))
         server, log = start_server(tmp, env, port)
         try:
+            version = pappl_version(port)
             test = tmp / "case.test"
             test.write_text(CASES[name](tmp, env))
             subprocess.run(
@@ -152,12 +189,24 @@ def run_case(name, port):
                     server.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     server.kill()
-        if code is not None and code < 0:
-            print(f"PASS {name}: the server was killed by signal {-code}, "
-                  f"reproducing the overflow")
-            return True
-        print(f"FAIL {name}: the server did not crash (exit {code}); "
-              f"libpappl may be patched — check and retire this finding")
+        crashed = code is not None and code < 0
+        shown = ".".join(str(part) for part in version)
+        fixed = ".".join(str(part) for part in FIXED_IN)
+        if version < FIXED_IN:
+            if crashed:
+                print(f"PASS {name}: PAPPL {shown} was killed by signal {-code}, "
+                      f"reproducing the overflow")
+                return True
+            print(f"FAIL {name}: PAPPL {shown} did not crash (exit {code}); "
+                  f"it may have been patched — check and retire this finding")
+        else:
+            if not crashed:
+                print(f"PASS {name}: PAPPL {shown} survived the input; "
+                      f"fixed upstream in {fixed}")
+                return True
+            print(f"FAIL {name}: PAPPL {shown} was killed by signal {-code} "
+                  f"even though this was fixed in {fixed}; this is a new "
+                  f"finding, not S-1 or S-2")
         log.seek(0)
         print("\n".join(log.read().splitlines()[-6:]))
         return False

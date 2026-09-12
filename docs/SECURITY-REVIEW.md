@@ -1,3 +1,12 @@
+> Current dependency (Q-27, 2026-09-12): upstream **PAPPL 1.4.12 fixes four of
+> the six libpappl findings below** — S-1, S-2, S-6 and S-7 — and leaves **S-4
+> and S-5 exactly as 1.3.1 has them**. This tree now supports and tests against 1.4.12 as well as
+> the 1.3.1 Debian ships in stable, testing and unstable alike, which is still
+> what the `.deb` depends on,
+> so every row below remains live for a machine on the archive's library. Each
+> finding says which release it is talking about. S-3 and S-4 are ours and are
+> unaffected.
+>
 > Current behaviour (Q-26, alpha-8): normal servers now bind all network
 > interfaces and advertise through PAPPL. The loopback-only mitigation discussed
 > below describes older releases and no longer applies. The dependency raster
@@ -20,20 +29,35 @@ temporary directory, so nothing touched the developer's own state.
 
 | # | Where | Class | Reachable in our config | Fix is ours? |
 |---|---|---|---|---|
-| S-1 | libpappl `job-process.c` | out-of-bounds write while dithering 8-bit input | yes, over IPP | no |
-| S-2 | libpappl `printer-ipp.c` | stack overflow on oversized `media-ready` | yes, over IPP | no |
+| S-1 | libpappl `job-process.c` | out-of-bounds write while dithering 8-bit input | yes, over IPP, **on 1.3.1 only** | no — fixed upstream in 1.4.12 |
+| S-2 | libpappl `printer-ipp.c` | stack overflow on oversized `media-ready` | yes, over IPP, **on 1.3.1 only** | no — fixed upstream in 1.4.12 |
 | S-3 | our systemd unit | the service ran as root | n/a | yes — fixed in 2.0.0~alpha-4 (Q-18) |
-| S-4 | libpappl control socket | mode 0777, any local user may drive the server | not in the shipped configuration | contained in 2.0.0~alpha-4 (Q-19) |
-| S-5 | libpappl `client-webif.c` + `loc.c` | a null footer is dereferenced on every web page | yes, over HTTP — it killed the server | avoided in 2.0.0~alpha-7 (Q-25) |
-| S-6 | libpappl `device-network.c` | a null DNS-SD client is asserted on while listing devices | yes, wherever D-Bus is unreachable | no — 2.0.0~alpha-7 stopped provoking it (Q-24) |
-| S-7 | libpappl `device-network.c` | the Avahi lock is kept after a failed browse | yes, wherever DNS-SD browsing fails | no |
+| S-4 | libpappl control socket | mode 0777, any local user may drive the server; **unchanged in 1.4.12** | not in the shipped configuration | contained in 2.0.0~alpha-4 (Q-19) |
+| S-5 | libpappl `client-webif.c` + `loc.c` | a null footer is dereferenced on every web page | yes, over HTTP — it killed the server; **still present in 1.4.12** | avoided in 2.0.0~alpha-7 (Q-25) |
+| S-6 | libpappl `device-network.c` | a null DNS-SD client is asserted on while listing devices | yes on 1.3.1, wherever D-Bus is unreachable | no — fixed upstream in 1.4.12; 2.0.0~alpha-7 also stopped provoking it (Q-24) |
+| S-7 | libpappl `device-network.c` | the Avahi lock is kept after a failed browse | yes on 1.3.1, wherever DNS-SD browsing fails | no — fixed upstream in 1.4.12 |
 
-S-1 and S-2 are the two unpatched upstream fixes the Q-1 follow-up flagged
+S-1 and S-2 are the two upstream fixes the Q-1 follow-up flagged
 (`4587888f50` and `44327aaac3`). Both are **confirmed present in 1.3.1** and
-both **crash the running server**. Neither has a fix this project can make: the
-faults are inside libpappl, before any callback this project registers. The
-containment that makes them a local denial of service rather than worse is that
-the server listens on the loopback address only.
+both **crash the running server** there. Neither has a fix this project can
+make: the faults are inside libpappl, before any callback this project
+registers.
+
+**Both are fixed in PAPPL 1.4.12**, released 2026-08-20 and listed in its
+`CHANGES.md` as the two "CVE-2026-NNNNN" overflow-protection entries. Verified
+here on 2026-09-12, not read off the changelog: `scripts/security-probe.py`
+kills a 1.3.1 server with SIGABRT (S-1) and SIGSEGV (S-2) and cannot make a
+1.4.12 server fall over with the same two inputs. So which of these rows applies
+to a given machine is decided by the libpappl that machine runs, and decision
+Q-27 is what makes running 1.4.12 possible — no Debian suite packages it, so it
+has to be built (`scripts/install-pappl-1.4.sh`). The probe now reads the
+version from the server's own `Server:` header and requires the crash on 1.3,
+the survival from 1.4.12, so neither release is checked against the other's
+expectation.
+
+On 1.3.1 these remain live, and since Q-26 the server listens on every
+interface, so the containment that once made them a *local* denial of service is
+gone: restrict TCP 8631 to trusted clients, or run 1.4.12.
 
 ## S-1 — dithering an 8-bit raster wider than the page overflows the output line
 
@@ -188,6 +212,13 @@ print a warning saying so. And it is a local workaround for a libpappl default
 that would be better fixed upstream, which is candidate (d) in Q-19 and is not
 this project's to schedule.
 
+**Not fixed in 1.4.12 either.** The listener code that creates the socket is
+the same in both releases — `add_listeners` in `pappl/system-accessors.c` calls
+`httpAddrListen` for a path exactly as 1.3.1 does, and the mode comes from
+libcups rather than from PAPPL, so there was nothing there for 1.4.12 to
+change. Q-19's containment therefore applies to both releases, and so does the
+upstream half of the report.
+
 ## S-5 — a null footer is dereferenced on every web page (AVOIDED in 2.0.0~alpha-7)
 
 Found while measuring Q-24, by fetching the pages rather than by reading code.
@@ -228,6 +259,13 @@ account could stop the print server at will, repeatedly.
 **Avoided by decision Q-25**, which passes a footer string, so the lookup has
 a key and returns it. The defect is libpappl's and is unchanged; an
 application that passes no footer still crashes.
+
+**Not fixed in 1.4.12** — the one finding here that the version move does not
+retire. Both halves are character for character what 1.3.1 has:
+`papplClientHTMLFooter` still resolves the footer before testing it
+(`pappl/client-webif.c:653`), and `papplLocGetString` still guards a null
+*loc* and not a null *key* (`pappl/loc.c:209`). So Q-25's workaround stays
+where it is on both releases, and the Debian bug report keeps this item.
 `scripts/server-probe.py` fetches every page and asserts the server is still
 running, which is what keeps this from coming back.
 
@@ -263,10 +301,28 @@ the web interface's "Add Printer" page, which lists devices
 kill the server on a machine with no system bus.
 
 **This project stopped provoking it in 2.0.0~alpha-7** (Q-24 replaced the
-mechanism that had made the bus unreachable on purpose), but the defect is
-untouched and this project cannot fix it: the page belongs to PAPPL.
+mechanism that had made the bus unreachable on purpose), and it cannot fix the
+defect itself: the page belongs to PAPPL.
 `scripts/server-probe.py` therefore skips that page where there is no system
 bus, and says so rather than failing.
+
+**Fixed in 1.4.12.** `pappl_dnssd_find` now takes the client into a variable
+and checks it before browsing, releasing the DNS-SD lock on the way out:
+
+```c
+if ((dnssd = _papplDNSSDInit(NULL)) == NULL)
+{
+  _papplDeviceError(err_cb, err_data, "Unable to create DNSSD service.");
+  cupsArrayDelete(devices);
+  _papplDNSSDUnlock();
+  return (ret);
+}
+```
+
+Established by reading the 1.4.12 source against the 1.3.1 source, not by
+re-provoking it: since alpha-7 this project does not make the bus unreachable,
+so there is nothing here to point at the fault any more. On 1.3.1 the null
+still goes straight into `avahi_service_browser_new`.
 
 ## S-7 — the Avahi lock is kept after a failed browse (NOT FIXED)
 
@@ -297,6 +353,12 @@ fix; `scripts/server-probe.py` reports it as a `KNOWN` finding rather than a
 failure, because a red check for an upstream defect that the environment
 decides is not a signal anyone can act on.
 
+**Fixed in 1.4.12**, in the same edit as S-6: both early returns in that
+function now call `_papplDNSSDUnlock()` before returning, so a failed browse no
+longer leaves the threaded-poll lock held. Established by reading the source of
+both releases. The `KNOWN` report stays in the probe, because the archive's
+1.3.1 is still what most machines will run.
+
 ## Actions
 
 Tracking the Q-1 follow-up's four agreed actions:
@@ -309,12 +371,20 @@ Tracking the Q-1 follow-up's four agreed actions:
    answer is yes.** Declaring `BLACK_1` does not remove the exposure; see S-1.
    `BLACK_1` stays, because the printer speaks only 1-bit and the answer must
    not override what the hardware needs — it is not a security lever here.
-3. **Loopback-only listener — already the case.** `application.rs` binds
-   `127.0.0.1`. A non-loopback bind is a deliberate future opt-in and must wait
-   on a patched libpappl.
+3. **Loopback-only listener — superseded twice over.** It was the case up to
+   alpha-7; decision Q-26 then made the listener bind every interface on the
+   maintainer's instruction, which is what standard PAPPL applications do. The
+   condition this item attached to that opt-in — that it "must wait on a
+   patched libpappl" — is now available rather than hypothetical: decision Q-27
+   makes 1.4.12, where S-1, S-2, S-6 and S-7 are fixed, a supported and tested
+   release. On the archive's 1.3.1 the raster defects are network-reachable and
+   the answer stays what Q-26 said: restrict TCP 8631 to trusted clients.
 4. **File the Debian bug and record the number here.** **Drafted 2026-09-10,
    extended 2026-09-12 with a second report for S-5, S-6 and S-7; not yet
-   submitted.** The full text is `docs/DEBIAN-BUG-DRAFT.md` — against
+   submitted.** Q-27 does not retire this: it is trixie's 1.3.1 that carries
+   the defects, and the case for the report is now stronger, since four of the
+   five are fixed in an upstream release that exists and has been tested here.
+   The draft is updated to say so. The full text is `docs/DEBIAN-BUG-DRAFT.md` — against
    `src:pappl` 1.3.1-2.1, severity grave, tagged security/upstream, citing
    `4587888f50` and `44327aaac3` and the confirmed 1.3.1 lines above, with both
    reproductions and the exposure argument. What is left is the send itself,
@@ -338,6 +408,13 @@ The scripts live under `scripts/` and are self-contained (loopback, scoped
   the run fails on the first page with the server dead of `SIGSEGV`. Against
   this tree the same run passes, which is the regression test for Q-25.
 
-Both print the server's exit signal and assert on it, so they fail if a future
-libpappl fixes the bug — at which point the corresponding row above can be
-retired rather than left as a stale warning.
+`security-probe.py` prints the server's exit signal and asserts on it — but on
+which outcome depends on the release it is talking to, which it reads from the
+running server's own `Server:` header. Against 1.3 it requires the crash, so a
+patched archive library turns it red and that is the signal to retire the row.
+Against 1.4.12 it requires the server to survive, so a crash there is a *new*
+finding rather than one of these. CI runs the group both ways: non-gating
+against the archive's library, gating against 1.4.12.
+
+`server-probe.py` is unchanged in this respect: S-5 is present in both
+releases, so its regression test for Q-25 means the same thing on either.
