@@ -147,7 +147,7 @@ maintainer scripts.
 ### Install it
 
 ```sh
-sudo apt install ./dist/ml216x-printer-app_2.0.0~alpha-8_amd64.deb
+sudo apt install ./dist/ml216x-printer-app_2.0.0~alpha-9_amd64.deb
 systemctl --user restart ml216x-printer-app   # also replaces a running older version
 systemctl --user status ml216x-printer-app
 ```

@@ -1,3 +1,32 @@
+ml216x-printer-app (2.0.0~alpha-9) unstable; urgency=medium
+
+  * Works with two libpappl releases now: the 1.3.1 Debian ships in stable,
+    testing and unstable alike, which is what this package depends on and is
+    built against, and upstream PAPPL 1.4.12 (decision Q-27). Both are tested
+    on every push. Nothing about installing this package changes.
+  * Why 1.4.12 is worth having: it fixes four of the six libpappl defects
+    docs/SECURITY-REVIEW.md records, including the two memory corruption bugs
+    that any client able to open the IPP port can reach (S-1 and S-2). That was
+    verified here rather than read off a changelog — the same two inputs kill a
+    1.3.1 server and cannot make a 1.4.12 one fall over. Two defects are
+    untouched by it, S-4 and S-5, and this release's own workarounds for them
+    stay in place.
+  * Debian packages no 1.4.x in any suite, so using it means building it:
+    scripts/install-pappl-1.4.sh does that, checking the tarball against a
+    recorded sha256 first, and README.md has the two environment variables that
+    then select it. Only the machine running the server needs this; a computer
+    printing to the queue speaks IPP and needs no libpappl at all. A .deb built
+    this way still declares the archive's libpappl1t64, because that is the
+    library it will meet on a user's machine.
+  * Bug fix that only 1.4.x users would have met: every print job failed at its
+    first page against 1.4, because the two releases number a job's pages
+    differently — 1.3 calls the first page 1 and 1.4 calls it 0 — and this
+    driver required its own count to match exactly. It now reads the numbering
+    off each job. The bytes sent to the printer are unchanged, which all 32
+    golden streams confirm.
+
+ -- Çağan ERGÜN <caganergun@tutanota.com>  Sat, 12 Sep 2026 14:20:00 +0300
+
 ml216x-printer-app (2.0.0~alpha-8) unstable; urgency=medium
 
   * Follow PAPPL's normal DNS-SD discovery and direct network IPP model.
